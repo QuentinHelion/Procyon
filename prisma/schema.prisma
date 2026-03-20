@@ -1,0 +1,76 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Severity {
+  INFO
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum VulnStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+}
+
+enum VulnSource {
+  MANUAL
+  IMPORT
+}
+
+model ScanTemplate {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?
+  /// Identifiant du parseur côté code (ex: pingcastle_xml, generic_csv)
+  parserId    String
+  /// Motif de fichier accepté (affichage / validation souple)
+  fileHint    String   @default("*.xml")
+  isBuiltIn   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  imports ImportBatch[]
+}
+
+model Vulnerability {
+  id          String       @id @default(cuid())
+  title       String
+  description String?
+  severity    Severity     @default(MEDIUM)
+  status      VulnStatus   @default(TODO)
+  source      VulnSource   @default(MANUAL)
+  /// Référence stable côté outil externe (ex: RiskId PingCastle)
+  externalRef String?
+  /// Données brutes ou champs additionnels du scan
+  metadata    Json?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  importBatchId String?
+  importBatch   ImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([severity])
+  @@index([externalRef])
+}
+
+model ImportBatch {
+  id         String   @id @default(cuid())
+  templateId String
+  template   ScanTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  fileName   String?
+  createdAt  DateTime @default(now())
+  itemCount  Int      @default(0)
+
+  vulnerabilities Vulnerability[]
+}

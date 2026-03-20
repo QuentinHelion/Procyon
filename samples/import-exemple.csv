@@ -1,0 +1,3 @@
+title,severity,description,externalRef
+Serveur sans correctif MS17-010,HIGH,Poste critique exposé,EX-001
+Compte de service avec SPN,MEDIUM,Kerberoasting possible,EX-002
