@@ -24,6 +24,8 @@ type Vuln = {
   status: VulnStatus;
   source: VulnSource;
   externalRef: string | null;
+  dueAt: string | null;
+  acknowledgedAt: string | null;
   metadata: unknown;
   createdAt: string;
   updatedAt: string;
@@ -74,6 +76,7 @@ export function Dashboard() {
   const [addTitle, setAddTitle] = useState("");
   const [addDesc, setAddDesc] = useState("");
   const [addSeverity, setAddSeverity] = useState<Severity>("MEDIUM");
+  const [addDue, setAddDue] = useState("");
 
   const [importSlug, setImportSlug] = useState("");
   const [importBusy, setImportBusy] = useState(false);
@@ -135,6 +138,16 @@ export function Dashboard() {
     setVulns((prev) => prev.map((x) => (x.id === id ? updated : x)));
   }
 
+  async function patchAcknowledge(id: string, acknowledged: boolean) {
+    const res = await fetch(`/api/vulnerabilities/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ acknowledgedAt: acknowledged ? true : null }),
+    });
+    const updated = await parseJson<Vuln>(res);
+    setVulns((prev) => prev.map((x) => (x.id === id ? updated : x)));
+  }
+
   async function removeVuln(id: string) {
     const res = await fetch(`/api/vulnerabilities/${id}`, { method: "DELETE" });
     if (!res.ok) {
@@ -146,6 +159,14 @@ export function Dashboard() {
 
   async function submitAdd(e: React.FormEvent) {
     e.preventDefault();
+    const dueIso =
+      addDue.trim() === ""
+        ? undefined
+        : new Date(`${addDue}T12:00:00`).toISOString();
+    if (addDue.trim() !== "" && Number.isNaN(new Date(dueIso!).getTime())) {
+      setError("Date d’échéance invalide");
+      return;
+    }
     const res = await fetch("/api/vulnerabilities", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -154,6 +175,7 @@ export function Dashboard() {
         description: addDesc || undefined,
         severity: addSeverity,
         status: "TODO",
+        ...(dueIso !== undefined ? { dueAt: dueIso } : {}),
       }),
     });
     const created = await parseJson<Vuln>(res);
@@ -162,6 +184,7 @@ export function Dashboard() {
     setAddTitle("");
     setAddDesc("");
     setAddSeverity("MEDIUM");
+    setAddDue("");
   }
 
   async function onImportFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -295,7 +318,11 @@ export function Dashboard() {
                 {(byStatus.get(col.status) ?? []).map((v) => (
                   <li
                     key={v.id}
-                    className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm"
+                    className={`rounded-lg border bg-[var(--surface)] p-3 shadow-sm ${
+                      v.status !== "DONE" && !v.acknowledgedAt
+                        ? "border-amber-500/45 ring-1 ring-amber-500/15"
+                        : "border-[var(--border)]"
+                    }`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <span
@@ -307,9 +334,32 @@ export function Dashboard() {
                         {v.source === "IMPORT" ? "Import" : "Manuel"}
                       </span>
                     </div>
+                    {v.status !== "DONE" && !v.acknowledgedAt ? (
+                      <p className="mt-2 rounded-md bg-amber-500/10 px-2 py-1 text-[10px] font-medium text-amber-900 dark:text-amber-200">
+                        Alerte non acquittée — prise de connaissance à enregistrer.
+                      </p>
+                    ) : v.acknowledgedAt ? (
+                      <p className="mt-2 text-[10px] text-[var(--muted)]">
+                        Acquittée le{" "}
+                        {new Date(v.acknowledgedAt).toLocaleString("fr-FR", {
+                          dateStyle: "short",
+                          timeStyle: "short",
+                        })}
+                      </p>
+                    ) : null}
                     <p className="mt-2 text-sm font-medium leading-snug">{v.title}</p>
                     {v.description ? (
                       <p className="mt-1 line-clamp-3 text-xs text-[var(--muted)]">{v.description}</p>
+                    ) : null}
+                    {v.dueAt ? (
+                      <p className="mt-2 text-[10px] font-medium text-[var(--accent)]">
+                        Échéance :{" "}
+                        {new Date(v.dueAt).toLocaleDateString("fr-FR", {
+                          weekday: "short",
+                          day: "numeric",
+                          month: "short",
+                        })}
+                      </p>
                     ) : null}
                     {v.importBatch?.template ? (
                       <p className="mt-2 text-[10px] text-[var(--muted)]">
@@ -317,6 +367,25 @@ export function Dashboard() {
                       </p>
                     ) : null}
                     <div className="mt-3 flex flex-wrap gap-1">
+                      {v.status !== "DONE" ? (
+                        v.acknowledgedAt ? (
+                          <button
+                            type="button"
+                            onClick={() => void patchAcknowledge(v.id, false)}
+                            className="rounded border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-[11px] transition hover:border-[var(--accent)]"
+                          >
+                            Révoquer acquittement
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => void patchAcknowledge(v.id, true)}
+                            className="rounded border border-amber-600/35 bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-900 dark:text-amber-100"
+                          >
+                            Acquitter l’alerte
+                          </button>
+                        )
+                      ) : null}
                       {COLUMNS.filter((c) => c.status !== v.status).map((c) => (
                         <button
                           key={c.status}
@@ -386,6 +455,15 @@ export function Dashboard() {
                     </option>
                   ))}
                 </select>
+              </label>
+              <label className="text-xs font-medium text-[var(--muted)]">
+                Échéance (optionnel)
+                <input
+                  type="date"
+                  value={addDue}
+                  onChange={(e) => setAddDue(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm"
+                />
               </label>
               <div className="mt-2 flex justify-end gap-2">
                 <button

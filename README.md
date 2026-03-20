@@ -30,13 +30,28 @@ Application web **ultra légère** de suivi des vulnérabilités : tableau en co
 
 4. Ouvrir [http://localhost:3000](http://localhost:3000).
 
+### Pages
+
+| Chemin | Rôle |
+|--------|------|
+| `/` | Tableau type To Do (colonnes par statut) |
+| `/planning` | **Rétro-planning** : périodes, 14 jours, **Kanban** (statuts), **Gantt** (création → échéance), filtres |
+| `/rapports` | Liste des **fichiers importés** archivés (consultation / téléchargement) |
+
 ## Docker
 
 ```bash
 docker compose up --build
 ```
 
-L’application écoute sur le port **3000**. Les migrations et le seed des modèles intégrés s’exécutent au démarrage du conteneur.
+L’application écoute sur le port **3000**. Les migrations et le seed des modèles intégrés s’exécutent au démarrage du conteneur. Un volume Docker **`procyon_reports`** conserve les fichiers de rapports importés (`REPORTS_DIR=/app/data/reports`).
+
+## Apparence & archives
+
+- **Thème** : menu **Paramètres** (engrenage dans la barre du haut) → **Clair**, **Sombre** ou **Système** (préférence dans le navigateur).
+- **Rapports** : chaque import réussi enregistre une copie sur le disque (`REPORTS_DIR`). La page **`/rapports`** liste les fichiers ; le menu Paramètres propose un raccourci vers cette page.
+- **Échéances** : champ optionnel **`dueAt`** (tableau, planning).
+- **Acquittement** : **`acknowledgedAt`** enregistre la prise de connaissance d’une alerte (`true` / date côté API, ou `null` pour révoquer). Indépendant du statut « Terminé ».
 
 ## Modèles de scan
 
@@ -49,7 +64,7 @@ Depuis l’UI, **Nouveau modèle** permet d’ajouter un enregistrement (nom, sl
 
 1. Implémenter une fonction de parse dans `src/lib/parsers/` qui renvoie `ParseResult`.
 2. L’enregistrer dans `src/lib/parsers/index.ts` (`runParser`).
-3. Ajouter l’identifiant dans `KNOWN_PARSERS` dans `src/app/api/templates/route.ts`.
+3. Ajouter l’identifiant dans `src/lib/parser-ids.ts` (`PARSER_IDS`).
 4. (Optionnel) seed ou création UI d’un modèle pointant vers ce `parserId`.
 
 ## API (aperçu)
@@ -60,6 +75,8 @@ Depuis l’UI, **Nouveau modèle** permet d’ajouter un enregistrement (nom, sl
 | `PATCH` / `DELETE` | `/api/vulnerabilities/[id]` | Mettre à jour / supprimer |
 | `GET` / `POST` | `/api/templates` | Lister / créer un modèle |
 | `POST` | `/api/import` | `multipart/form-data` : `file`, `templateSlug` |
+| `GET` | `/api/reports` | Liste des imports (métadonnées + présence du fichier archivé) |
+| `GET` | `/api/reports/[id]/file` | Fichier archivé (`?download=1` pour forcer le téléchargement) |
 
 Les imports avec `externalRef` mettent à jour une entrée existante portant la même référence.
 

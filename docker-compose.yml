@@ -25,9 +25,13 @@ services:
       - "3000:3000"
     environment:
       DATABASE_URL: postgresql://procyon:procyon@db:5432/procyon?schema=public
+      REPORTS_DIR: /app/data/reports
+    volumes:
+      - procyon_reports:/app/data/reports
     depends_on:
       db:
         condition: service_healthy
 
 volumes:
   procyon_pg:
+  procyon_reports:

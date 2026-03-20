@@ -33,6 +33,48 @@ export async function PATCH(request: Request, context: Ctx) {
   if (typeof b.status === "string" && STATUSES.has(b.status as VulnStatus)) {
     data.status = b.status;
   }
+  if ("dueAt" in b) {
+    if (b.dueAt === null) {
+      data.dueAt = null;
+    } else if (typeof b.dueAt === "string") {
+      const t = b.dueAt.trim();
+      if (!t) {
+        data.dueAt = null;
+      } else {
+        const d = new Date(t);
+        if (Number.isNaN(d.getTime())) {
+          return NextResponse.json({ error: "dueAt invalide (ISO ou date)" }, { status: 400 });
+        }
+        data.dueAt = d;
+      }
+    } else {
+      return NextResponse.json({ error: "dueAt doit être une chaîne ISO ou null" }, { status: 400 });
+    }
+  }
+
+  if ("acknowledgedAt" in b) {
+    if (b.acknowledgedAt === null || b.acknowledgedAt === false) {
+      data.acknowledgedAt = null;
+    } else if (b.acknowledgedAt === true) {
+      data.acknowledgedAt = new Date();
+    } else if (typeof b.acknowledgedAt === "string") {
+      const t = b.acknowledgedAt.trim();
+      if (!t) {
+        data.acknowledgedAt = null;
+      } else {
+        const d = new Date(t);
+        if (Number.isNaN(d.getTime())) {
+          return NextResponse.json({ error: "acknowledgedAt invalide" }, { status: 400 });
+        }
+        data.acknowledgedAt = d;
+      }
+    } else {
+      return NextResponse.json(
+        { error: "acknowledgedAt : null, false, true ou chaîne ISO" },
+        { status: 400 },
+      );
+    }
+  }
 
   if (Object.keys(data).length === 0) {
     return NextResponse.json({ error: "Aucun champ à mettre à jour" }, { status: 400 });

@@ -38,3 +38,6 @@ yarn-error.log*
 # prisma
 prisma/*.db
 prisma/*.db-journal
+
+# rapports importés (copies locales)
+data/reports/

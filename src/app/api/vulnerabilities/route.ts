@@ -45,6 +45,20 @@ export async function POST(request: Request) {
       ? (b.status as VulnStatus)
       : VulnStatus.TODO;
 
+  let dueAt: Date | null | undefined;
+  if ("dueAt" in b) {
+    if (b.dueAt === null || b.dueAt === "") dueAt = null;
+    else if (typeof b.dueAt === "string") {
+      const d = new Date(b.dueAt.trim());
+      if (Number.isNaN(d.getTime())) {
+        return NextResponse.json({ error: "dueAt invalide" }, { status: 400 });
+      }
+      dueAt = d;
+    } else {
+      return NextResponse.json({ error: "dueAt invalide" }, { status: 400 });
+    }
+  }
+
   const created = await prisma.vulnerability.create({
     data: {
       title,
@@ -52,6 +66,7 @@ export async function POST(request: Request) {
       severity,
       status,
       source: VulnSource.MANUAL,
+      ...(dueAt !== undefined ? { dueAt } : {}),
     },
     include: { importBatch: { include: { template: true } } },
   });

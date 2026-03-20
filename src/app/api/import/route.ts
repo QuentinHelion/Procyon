@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { VulnSource } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { runParser } from "@/lib/parsers";
+import { saveImportedReport } from "@/lib/reports-storage";
 
 export async function POST(request: Request) {
   let form: FormData;
@@ -40,6 +41,16 @@ export async function POST(request: Request) {
       itemCount: 0,
     },
   });
+
+  try {
+    const storedPath = await saveImportedReport(batch.id, file.name, buf);
+    await prisma.importBatch.update({
+      where: { id: batch.id },
+      data: { storedPath },
+    });
+  } catch (e) {
+    console.error("[import] archivage du fichier échoué", e);
+  }
 
   let created = 0;
   let updated = 0;
