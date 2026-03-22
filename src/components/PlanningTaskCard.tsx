@@ -56,8 +56,8 @@ export function PlanningTaskCard({
 
   return (
     <div
-      className={`rounded-lg border bg-[var(--surface)] p-3 ${
-        unacked ? "border-amber-500/50 ring-1 ring-amber-500/20" : "border-[var(--border)]"
+      className={`rounded-[var(--radius-md)] border bg-[var(--surface)] p-3.5 shadow-[var(--shadow-sm)] ${
+        unacked ? "border-amber-500/45 shadow-[0_0_0_1px_rgba(245,158,11,0.12)]" : "border-[var(--border)]"
       }`}
     >
       <div className="flex flex-wrap items-start justify-between gap-2">

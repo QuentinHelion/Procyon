@@ -1,11 +1,15 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Plus_Jakarta_Sans } from "next/font/google";
 import Script from "next/script";
-import { AppNav } from "@/components/AppNav";
+import { AppSidebar } from "@/components/AppSidebar";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"] });
+const plusJakarta = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  variable: "--font-plus-jakarta",
+  display: "swap",
+});
 
 const themeInit = `(function(){try{var k="procyon-theme";var m=localStorage.getItem(k);var d=false;if(m==="dark")d=true;else if(m==="light")d=false;else d=window.matchMedia("(prefers-color-scheme: dark)").matches;if(d)document.documentElement.classList.add("dark");else document.documentElement.classList.remove("dark");}catch(e){}})();`;
 
@@ -20,14 +24,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="fr" suppressHydrationWarning>
-      <body className={`${inter.className} min-h-screen antialiased`}>
+    <html lang="fr" className={plusJakarta.variable} suppressHydrationWarning>
+      <body className={`${plusJakarta.className} min-h-dvh antialiased`}>
         <Script id="procyon-theme-init" strategy="beforeInteractive">
           {themeInit}
         </Script>
         <ThemeProvider>
-          <AppNav />
-          <main>{children}</main>
+          <div className="flex min-h-dvh items-stretch">
+            <AppSidebar />
+            <main className="min-h-dvh min-w-0 flex-1 overflow-x-hidden">{children}</main>
+          </div>
         </ThemeProvider>
       </body>
     </html>

@@ -32,22 +32,21 @@ export function SettingsMenu() {
   const themeOptions: { value: ThemeMode; label: string }[] = [
     { value: "light", label: "Clair" },
     { value: "dark", label: "Sombre" },
-    { value: "system", label: "Système" },
+    { value: "system", label: "Auto" },
   ];
 
   return (
-    <div className="relative">
+    <div className="relative w-full">
       <button
         ref={btnRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] transition hover:bg-[var(--column)]"
+        className="flex w-full items-center justify-center gap-3 rounded-lg px-2 py-2.5 text-[var(--sidebar-muted)] transition-colors hover:bg-[var(--sidebar-hover)] hover:text-[var(--sidebar-text)] lg:justify-start lg:px-3"
         aria-expanded={open}
         aria-haspopup="dialog"
-        title="Paramètres"
       >
         <svg
-          className="h-5 w-5"
+          className="h-5 w-5 shrink-0"
           fill="none"
           stroke="currentColor"
           strokeWidth={1.75}
@@ -61,23 +60,24 @@ export function SettingsMenu() {
           />
           <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
         </svg>
+        <span className="hidden text-sm font-semibold lg:inline">Paramètres</span>
       </button>
 
       {open ? (
         <div
           ref={panelRef}
-          className="absolute right-0 z-40 mt-2 w-[min(100vw-2rem,20rem)] rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-lg"
-          style={{ boxShadow: "0 12px 40px rgba(0,0,0,0.12)" }}
+          className="fixed bottom-4 left-[4.25rem] z-[100] w-[min(calc(100vw-2rem),18rem)] rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-xl lg:absolute lg:bottom-full lg:left-0 lg:mb-2 lg:ml-0 lg:w-72"
+          style={{ boxShadow: "var(--shadow-card), 0 12px 40px rgba(15,23,42,0.12)" }}
           role="dialog"
           aria-label="Paramètres"
         >
           <h2 className="text-sm font-semibold text-[var(--text)]">Paramètres</h2>
 
           <div className="mt-4">
-            <p className="text-xs font-medium text-[var(--muted)]">Apparence</p>
+            <p className="text-xs font-medium text-[var(--muted)]">Thème</p>
             <p className="mt-0.5 text-[10px] text-[var(--muted)]">
-              Actif : {resolved === "dark" ? "sombre" : "clair"}
-              {mode === "system" ? " (système)" : ""}
+              Rendu : {resolved === "dark" ? "sombre" : "clair"}
+              {mode === "system" ? " · suit le système" : ""}
             </p>
             <div className="mt-2 grid grid-cols-3 gap-1 rounded-lg bg-[var(--column)] p-1">
               {themeOptions.map((o) => (
@@ -85,9 +85,9 @@ export function SettingsMenu() {
                   key={o.value}
                   type="button"
                   onClick={() => setMode(o.value)}
-                  className={`rounded-md px-2 py-2 text-center text-xs font-medium transition ${
+                  className={`rounded-md px-2 py-2 text-center text-xs font-semibold transition ${
                     mode === o.value
-                      ? "bg-[var(--surface)] text-[var(--text)] shadow-sm"
+                      ? "bg-[var(--surface)] text-[var(--accent)] shadow-sm ring-1 ring-[var(--border)]"
                       : "text-[var(--muted)] hover:text-[var(--text)]"
                   }`}
                 >
@@ -98,13 +98,13 @@ export function SettingsMenu() {
           </div>
 
           <div className="mt-5 border-t border-[var(--border)] pt-4">
-            <p className="text-xs font-medium text-[var(--muted)]">Données</p>
+            <p className="text-xs font-medium text-[var(--muted)]">Archives</p>
             <Link
               href="/rapports"
               onClick={() => setOpen(false)}
-              className="mt-2 block rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-center text-xs font-medium text-[var(--accent)] hover:bg-[var(--column)]"
+              className="ui-btn-secondary mt-2 block w-full px-3 py-2.5 text-center text-xs font-semibold text-[var(--accent)]"
             >
-              Rapports archivés
+              Ouvrir les rapports
             </Link>
           </div>
         </div>

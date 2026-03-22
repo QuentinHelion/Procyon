@@ -86,19 +86,30 @@ export function ReportsArchiveView() {
 
   return (
     <>
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div className="mb-10 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Rapports archivés</h1>
-          <p className="mt-1 max-w-2xl text-sm text-[var(--muted)]">
-            Copie de chaque fichier importé conservée sur le serveur (répertoire défini par{" "}
-            <code className="rounded bg-[var(--column)] px-1 text-xs">REPORTS_DIR</code>, par défaut{" "}
-            <code className="rounded bg-[var(--column)] px-1 text-xs">data/reports</code>).
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--accent)]">
+            Archives
+          </p>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight text-[var(--text)] sm:text-3xl">
+            Rapports importés
+          </h1>
+          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--muted)]">
+            Copies conservées sur le serveur (
+            <code className="rounded-md bg-[var(--column)] px-1.5 py-0.5 text-xs font-mono text-[var(--text)]">
+              REPORTS_DIR
+            </code>
+            , défaut{" "}
+            <code className="rounded-md bg-[var(--column)] px-1.5 py-0.5 text-xs font-mono text-[var(--text)]">
+              data/reports
+            </code>
+            ).
           </p>
         </div>
         <button
           type="button"
           onClick={() => void load()}
-          className="self-start rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-medium hover:bg-[var(--column)]"
+          className="ui-btn-secondary self-start px-4 py-2.5 text-sm font-semibold"
         >
           Actualiser
         </button>
@@ -117,10 +128,7 @@ export function ReportsArchiveView() {
       ) : (
         <ul className="space-y-3">
           {reports?.map((r) => (
-            <li
-              key={r.id}
-              className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm"
-            >
+            <li key={r.id} className="ui-card p-5 transition hover:border-[var(--border-strong)]">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-[var(--text)]">
@@ -141,14 +149,14 @@ export function ReportsArchiveView() {
                     type="button"
                     disabled={!r.hasFile}
                     onClick={() => void consult(r)}
-                    className="rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-40"
+                    className="ui-btn-secondary px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     Consulter
                   </button>
                   <a
                     href={r.hasFile ? `/api/reports/${r.id}/file?download=1` : undefined}
-                    className={`inline-flex items-center rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-medium ${
-                      !r.hasFile ? "pointer-events-none opacity-40" : "hover:bg-[var(--column)]"
+                    className={`ui-btn-secondary inline-flex items-center px-3 py-2 text-xs font-semibold ${
+                      !r.hasFile ? "pointer-events-none opacity-40" : ""
                     }`}
                     {...(r.hasFile ? { download: true } : {})}
                   >

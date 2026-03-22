@@ -11,8 +11,8 @@ type Props = {
 export function ReportPreviewModal({ open, title, text, binary, onClose }: Props) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 p-4 sm:items-center">
-      <div className="flex max-h-[90vh] w-full max-w-4xl flex-col rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-xl">
+    <div className="fixed inset-0 z-[110] flex items-end justify-center bg-black/50 p-4 backdrop-blur-[2px] sm:items-center">
+      <div className="ui-card flex max-h-[90vh] w-full max-w-4xl flex-col shadow-2xl">
         <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-3">
           <h3 className="truncate text-sm font-semibold">{title}</h3>
           <button

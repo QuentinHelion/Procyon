@@ -172,72 +172,89 @@ export function RetroPlanning() {
     setItems((prev) => prev.map((x) => (x.id === id ? updated : x)));
   }
 
-  const viewTabs: { id: PlanningView; label: string; hint: string }[] = [
-    { id: "buckets", label: "Périodes", hint: "Retard, semaine, sans date…" },
-    { id: "timeline", label: "14 jours", hint: "Colonnes par jour" },
-    { id: "kanban", label: "Kanban", hint: "Par statut" },
+  const viewOptions: { id: PlanningView; label: string; hint: string }[] = [
+    { id: "buckets", label: "Échéances (périodes)", hint: "Retard, cette semaine, sans date…" },
+    { id: "timeline", label: "14 jours", hint: "Une colonne par jour" },
+    { id: "kanban", label: "Kanban", hint: "Par statut (comme le tableau)" },
     { id: "gantt", label: "Gantt", hint: "Création → échéance" },
   ];
 
   return (
-    <div className="mx-auto max-w-[1400px] px-4 py-8 sm:px-6">
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+    <div className="mx-auto max-w-[1480px] px-5 py-8 lg:px-10 lg:py-10">
+      <div className="mb-10 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Rétro-planning</h1>
-          <p className="mt-1 max-w-2xl text-sm text-[var(--muted)]">
-            Plusieurs vues pour piloter les remédiations : échéances, kanban par statut, diagramme de Gantt.
-            Acquittez les alertes pour tracer la prise de connaissance (hors clôture de la fiche).
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--accent)]">
+            Pilotage temporel
+          </p>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight text-[var(--text)] sm:text-3xl">
+            Rétro-planning
+          </h1>
+          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--muted)]">
+            Choisissez une vue ci-dessous pour lire les échéances et mettre à jour les tâches. Pour changer le{" "}
+            <strong>statut</strong> par glisser-déposer, utilisez le{" "}
+            <Link href="/" className="text-[var(--accent)] underline underline-offset-2">
+              tableau de bord
+            </Link>
+            .
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => void load()}
-            className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs font-medium hover:bg-[var(--column)]"
+            className="ui-btn-secondary px-4 py-2.5 text-xs font-semibold"
           >
             Actualiser
           </button>
         </div>
       </div>
 
-      <div className="mb-4 flex flex-col gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-        <div className="flex flex-wrap gap-1">
-          {viewTabs.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              title={t.hint}
-              onClick={() => setView(t.id)}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-                view === t.id
-                  ? "bg-[var(--accent)] text-white"
-                  : "bg-[var(--column)] text-[var(--muted)] hover:text-[var(--text)]"
-              }`}
+      <div className="ui-card mb-6 flex flex-col gap-4 p-4 lg:p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
+          <label className="flex min-w-[min(100%,240px)] flex-col gap-1.5 text-xs font-medium text-[var(--muted)]">
+            Vue
+            <select
+              value={view}
+              onChange={(e) => setView(e.target.value as PlanningView)}
+              className="ui-input w-full max-w-md px-3 py-2.5 text-sm font-semibold text-[var(--text)]"
+              aria-label="Choisir la vue du planning"
             >
-              {t.label}
-            </button>
-          ))}
-        </div>
-        <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--muted)]">
-          <label className="flex cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
-              checked={showDone}
-              onChange={(e) => setShowDone(e.target.checked)}
-              className="rounded border-[var(--border)]"
-            />
-            Afficher les terminées
+              {viewOptions.map((o) => (
+                <option key={o.id} value={o.id} title={o.hint}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
           </label>
-          <label className="flex cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
-              checked={onlyUnacknowledged}
-              onChange={(e) => setOnlyUnacknowledged(e.target.checked)}
-              className="rounded border-[var(--border)]"
-            />
-            Non acquittées seulement
-          </label>
+          <p className="text-[11px] leading-snug text-[var(--muted)] sm:max-w-xs sm:pb-1">
+            {viewOptions.find((o) => o.id === view)?.hint}
+          </p>
         </div>
+        <details className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-muted)]/60 px-3 py-2 text-xs">
+          <summary className="cursor-pointer select-none font-semibold text-[var(--text)]">
+            Filtres
+          </summary>
+          <div className="mt-3 flex flex-col gap-3 text-[var(--muted)] sm:flex-row sm:flex-wrap sm:gap-6">
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                type="checkbox"
+                checked={showDone}
+                onChange={(e) => setShowDone(e.target.checked)}
+                className="rounded border-[var(--border)]"
+              />
+              Afficher les terminées
+            </label>
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                type="checkbox"
+                checked={onlyUnacknowledged}
+                onChange={(e) => setOnlyUnacknowledged(e.target.checked)}
+                className="rounded border-[var(--border)]"
+              />
+              Non acquittées seulement
+            </label>
+          </div>
+        </details>
       </div>
 
       {error ? (
@@ -373,14 +390,14 @@ function TimelineBody({
           });
           const isToday = key === toLocalDateKey(new Date());
           return (
-            <div
-              key={key}
-              className={`flex w-[140px] shrink-0 flex-col rounded-xl border p-2 ${
-                isToday
-                  ? "border-[var(--accent)] bg-[var(--accent)]/5"
-                  : "border-[var(--border)] bg-[var(--column)]"
-              }`}
-            >
+                <div
+                  key={key}
+                  className={`flex w-[140px] shrink-0 flex-col rounded-[var(--radius-lg)] border p-2.5 ${
+                    isToday
+                      ? "border-[var(--accent)] bg-[var(--accent-subtle)] shadow-sm"
+                      : "border-[var(--border)] bg-[var(--surface-muted)]"
+                  }`}
+                >
               <p className="text-center text-[10px] font-semibold capitalize text-[var(--text)]">
                 {label}
               </p>
@@ -427,7 +444,7 @@ function KanbanBody({
           return (
             <div
               key={col.status}
-              className="flex min-h-[200px] flex-col rounded-xl border border-dashed border-[var(--border)] bg-[var(--column)]/50 p-3"
+              className="flex min-h-[200px] flex-col rounded-[var(--radius-lg)] border border-dashed border-[var(--border-strong)] bg-[var(--surface-muted)]/80 p-4"
             >
               <h2 className="text-sm font-semibold text-[var(--muted)]">{col.label}</h2>
               <p className="mt-2 text-xs text-[var(--muted)]">
@@ -440,9 +457,9 @@ function KanbanBody({
         return (
           <div
             key={col.status}
-            className="flex min-h-[420px] flex-col rounded-xl border border-[var(--border)] bg-[var(--column)] p-3"
+            className="ui-card flex min-h-[420px] flex-col bg-[var(--surface-muted)] p-4"
           >
-            <h2 className="text-sm font-semibold text-[var(--text)]">
+            <h2 className="text-sm font-bold text-[var(--text)]">
               {col.label}
               <span className="ml-2 text-xs font-normal text-[var(--muted)]">({list.length})</span>
             </h2>
@@ -482,7 +499,7 @@ function GanttBody({ ganttModel }: { ganttModel: ReturnType<typeof buildGanttMod
         Chaque barre va de la <strong>date de création</strong> à l’<strong>échéance</strong> (ou +3 jours si
         pas d’échéance). Ligne verticale : aujourd’hui.
       </p>
-      <div className="overflow-x-auto rounded-xl border border-[var(--border)] bg-[var(--surface)]">
+      <div className="ui-card overflow-x-auto">
         <div className="min-w-[640px] p-3">
           <div className="relative mb-2 h-8 border-b border-[var(--border)]">
             {weekStarts.map((w) => {
@@ -513,7 +530,7 @@ function GanttBody({ ganttModel }: { ganttModel: ReturnType<typeof buildGanttMod
                   </span>
                   <div className="relative h-7 min-w-0 flex-1 rounded bg-[var(--column)]">
                     <div
-                      className="absolute top-1 h-5 rounded-md bg-[var(--accent)]/80"
+                      className="absolute top-1 h-5 rounded-[6px] bg-[var(--accent)] opacity-90"
                       style={{ left: `${b.leftPct}%`, width: `${b.widthPct}%` }}
                       title={`${new Date(b.startMs).toLocaleDateString("fr-FR")} → ${new Date(b.endMs).toLocaleDateString("fr-FR")}`}
                     />
