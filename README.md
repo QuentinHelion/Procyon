@@ -82,4 +82,4 @@ Les imports avec `externalRef` mettent à jour une entrée existante portant la 
 
 ## Licence
 
-Projet exemple — adaptez selon vos besoins.
+Apache License 2.0
