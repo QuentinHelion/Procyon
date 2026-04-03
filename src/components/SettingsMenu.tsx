@@ -97,16 +97,6 @@ export function SettingsMenu() {
             </div>
           </div>
 
-          <div className="mt-5 border-t border-[var(--border)] pt-4">
-            <p className="text-xs font-medium text-[var(--muted)]">Archives</p>
-            <Link
-              href="/rapports"
-              onClick={() => setOpen(false)}
-              className="ui-btn-secondary mt-2 block w-full px-3 py-2.5 text-center text-xs font-semibold text-[var(--accent)]"
-            >
-              Ouvrir les rapports
-            </Link>
-          </div>
         </div>
       ) : null}
     </div>

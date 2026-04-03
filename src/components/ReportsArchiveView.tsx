@@ -130,8 +130,13 @@ export function ReportsArchiveView() {
           {reports?.map((r) => (
             <li key={r.id} className="ui-card p-5 transition hover:border-[var(--border-strong)]">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-[var(--text)]">
+                <button
+                  type="button"
+                  className="min-w-0 text-left"
+                  disabled={!r.hasFile}
+                  onClick={() => (r.hasFile ? void consult(r) : undefined)}
+                >
+                  <p className="truncate text-sm font-semibold text-[var(--text)] underline decoration-dotted underline-offset-2 disabled:cursor-default disabled:no-underline">
                     {r.fileName ?? "Sans nom"}
                   </p>
                   <p className="mt-1 text-xs text-[var(--muted)]">
@@ -143,7 +148,7 @@ export function ReportsArchiveView() {
                       Fichier non conservé (import antérieur à l’archivage ou erreur d’écriture).
                     </p>
                   ) : null}
-                </div>
+                </button>
                 <div className="flex shrink-0 flex-wrap gap-2">
                   <button
                     type="button"

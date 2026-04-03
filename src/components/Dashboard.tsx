@@ -134,12 +134,14 @@ function DashboardDraggableVulnCard({
   patchStatus,
   removeVuln,
   setError,
+  onEdit,
 }: {
   v: Vuln;
   patchAcknowledge: (id: string, acknowledged: boolean) => Promise<void>;
   patchStatus: (id: string, status: VulnStatus) => Promise<void>;
   removeVuln: (id: string) => Promise<void>;
   setError: (msg: string | null) => void;
+  onEdit: (v: Vuln) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: v.id,
@@ -179,9 +181,25 @@ function DashboardDraggableVulnCard({
             >
               {severityLabel[v.severity]}
             </span>
-            <span className="rounded-md bg-[var(--column)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--muted)]">
-              {v.source === "IMPORT" ? "Scan importé" : "Saisie manuelle"}
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="rounded-md bg-[var(--column)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--muted)]">
+                {v.source === "IMPORT" ? "Scan importé" : "Saisie manuelle"}
+              </span>
+              <button
+                type="button"
+                onClick={() => onEdit(v)}
+                className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface-muted)] text-[var(--muted)] transition hover:border-[var(--accent)] hover:bg-[var(--accent-subtle)] hover:text-[var(--text)]"
+                aria-label="Modifier la fiche"
+              >
+                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M16.862 4.487 19.5 7.125m-2.638-2.638L9.75 14.25 7.5 16.5l-.75 2.25 2.25-.75 2.25-2.25 7.112-7.113a1.875 1.875 0 0 0 0-2.651 1.875 1.875 0 0 0-2.651 0Z"
+                  />
+                </svg>
+              </button>
+            </div>
           </div>
           {v.status !== "DONE" && !v.acknowledgedAt ? (
             <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/[0.08] px-2.5 py-2 dark:bg-amber-500/10">
@@ -295,22 +313,16 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [addOpen, setAddOpen] = useState(false);
-  const [addTitle, setAddTitle] = useState("");
-  const [addDesc, setAddDesc] = useState("");
-  const [addSeverity, setAddSeverity] = useState<Severity>("MEDIUM");
-  const [addDue, setAddDue] = useState("");
+  const [editOpen, setEditOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<Vuln | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDesc, setEditDesc] = useState("");
+  const [editSeverity, setEditSeverity] = useState<Severity>("MEDIUM");
+  const [editDue, setEditDue] = useState("");
 
   const [importSlug, setImportSlug] = useState("");
   const [importBusy, setImportBusy] = useState(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
-
-  const [tplOpen, setTplOpen] = useState(false);
-  const [tplName, setTplName] = useState("");
-  const [tplSlug, setTplSlug] = useState("");
-  const [tplParser, setTplParser] = useState("generic_csv");
-  const [tplDesc, setTplDesc] = useState("");
-  const [tplHint, setTplHint] = useState("*.csv");
 
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
@@ -366,6 +378,28 @@ export function Dashboard() {
     };
   }, [vulns]);
 
+  const [visibleStatuses, setVisibleStatuses] = useState<Record<VulnStatus, boolean>>({
+    TODO: true,
+    IN_PROGRESS: true,
+    DONE: true,
+  });
+  const [showColumnSettings, setShowColumnSettings] = useState(false);
+
+  const acknowledgedCount = useMemo(
+    () => vulns.filter((v) => !!v.acknowledgedAt).length,
+    [vulns],
+  );
+
+  function toggleStatusVisibility(status: VulnStatus) {
+    setVisibleStatuses((prev) => {
+      const next = { ...prev, [status]: !prev[status] };
+      if (!next.TODO && !next.IN_PROGRESS && !next.DONE) {
+        return prev;
+      }
+      return next;
+    });
+  }
+
   async function patchStatus(id: string, status: VulnStatus) {
     const res = await fetch(`/api/vulnerabilities/${id}`, {
       method: "PATCH",
@@ -395,34 +429,45 @@ export function Dashboard() {
     setVulns((prev) => prev.filter((x) => x.id !== id));
   }
 
-  async function submitAdd(e: React.FormEvent) {
+  function openEdit(v: Vuln) {
+    setEditTarget(v);
+    setEditTitle(v.title);
+    setEditDesc(v.description ?? "");
+    setEditSeverity(v.severity);
+    setEditDue(v.dueAt ? new Date(v.dueAt).toISOString().slice(0, 10) : "");
+    setEditOpen(true);
+  }
+
+  async function submitEdit(e: React.FormEvent) {
     e.preventDefault();
+    if (!editTarget) return;
     const dueIso =
-      addDue.trim() === ""
-        ? undefined
-        : new Date(`${addDue}T12:00:00`).toISOString();
-    if (addDue.trim() !== "" && Number.isNaN(new Date(dueIso!).getTime())) {
+      editDue.trim() === ""
+        ? null
+        : new Date(`${editDue}T12:00:00`).toISOString();
+    if (editDue.trim() !== "" && Number.isNaN(new Date(dueIso!).getTime())) {
       setError("Date d’échéance invalide");
       return;
     }
-    const res = await fetch("/api/vulnerabilities", {
-      method: "POST",
+    const payload: Partial<Vuln> & { dueAt?: string | null } = {
+      title: editTitle,
+      description: editDesc || null,
+      severity: editSeverity,
+    };
+    if (editDue.trim() === "") {
+      payload.dueAt = null;
+    } else {
+      payload.dueAt = dueIso;
+    }
+    const res = await fetch(`/api/vulnerabilities/${editTarget.id}`, {
+      method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title: addTitle,
-        description: addDesc || undefined,
-        severity: addSeverity,
-        status: "TODO",
-        ...(dueIso !== undefined ? { dueAt: dueIso } : {}),
-      }),
+      body: JSON.stringify(payload),
     });
-    const created = await parseJson<Vuln>(res);
-    setVulns((prev) => [created, ...prev]);
-    setAddOpen(false);
-    setAddTitle("");
-    setAddDesc("");
-    setAddSeverity("MEDIUM");
-    setAddDue("");
+    const updated = await parseJson<Vuln>(res);
+    setVulns((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+    setEditOpen(false);
+    setEditTarget(null);
   }
 
   async function onImportFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -446,29 +491,6 @@ export function Dashboard() {
     }
   }
 
-  async function submitTemplate(e: React.FormEvent) {
-    e.preventDefault();
-    const res = await fetch("/api/templates", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: tplName,
-        slug: tplSlug,
-        parserId: tplParser,
-        description: tplDesc || undefined,
-        fileHint: tplHint,
-      }),
-    });
-    await parseJson<Template>(res);
-    setTplOpen(false);
-    setTplName("");
-    setTplSlug("");
-    setTplDesc("");
-    setTplParser("generic_csv");
-    setTplHint("*.csv");
-    await load();
-  }
-
   return (
     <div className="mx-auto max-w-[1480px] px-5 py-8 lg:px-10 lg:py-10">
       <header className="mb-8 flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
@@ -480,31 +502,49 @@ export function Dashboard() {
             Tableau de bord
           </h1>
           <p className="mt-2 max-w-lg text-sm leading-relaxed text-[var(--muted)]">
-            Priorisez, acquittez et faites avancer les fiches — la gravité est sur le bord gauche. Glissez une
-            carte depuis la poignée à gauche pour changer la colonne (statut).
+            Priorisez, acquittez, modifiez et faites avancer les fiches — la gravité est sur le bord gauche.
+            Glissez une carte depuis la poignée à gauche pour changer la colonne (statut).
           </p>
         </div>
-        <div className="flex shrink-0 flex-wrap gap-2">
+        <div className="relative flex shrink-0 flex-wrap items-start gap-2">
           <button
             type="button"
-            onClick={() => setAddOpen(true)}
-            className="ui-btn-primary inline-flex items-center gap-2 px-4 py-2.5 text-sm shadow-sm"
+            onClick={() => setShowColumnSettings((v) => !v)}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface-muted)] text-[var(--muted)] shadow-sm transition hover:border-[var(--accent)] hover:bg-[var(--accent-subtle)] hover:text-[var(--text)]"
+            aria-label="Paramètres d’affichage des colonnes"
           >
-            <svg className="h-4 w-4 opacity-90" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.7} viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.72 7.72 0 0 1 0 .255c-.008.378.137.75.43.991l1.003.827c.424.35.534.954.26 1.43l-1.296 2.247a1.125 1.125 0 0 1-1.37.491l-1.216-.456c-.356-.133-.751-.072-1.076.124a6.52 6.52 0 0 1-.22.128c-.332.183-.582.495-.644.869l-.214 1.281c-.09.543-.56.94-1.11.94h-2.593c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49L3.21 15.36a1.125 1.125 0 0 1 .26-1.43l1.004-.828c.292-.24.437-.613.43-.991a7.72 7.72 0 0 1 0-.255c.007-.38-.138-.751-.43-.992L3.47 9.037a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.217.456c.355.133.75.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"
+              />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
             </svg>
-            Nouvelle fiche
           </button>
-          <button
-            type="button"
-            onClick={() => setTplOpen(true)}
-            className="ui-btn-secondary inline-flex items-center gap-2 px-4 py-2.5 text-sm"
-          >
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25" />
-            </svg>
-            Modèle d’import
-          </button>
+          {showColumnSettings ? (
+            <div className="absolute right-0 top-11 z-20 w-64 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-3 shadow-xl">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                Colonnes visibles
+              </p>
+              <div className="mt-2 flex flex-col gap-1.5">
+                {COLUMNS.map((c) => (
+                  <label
+                    key={c.status}
+                    className="inline-flex cursor-pointer items-center gap-2 text-[11px] text-[var(--muted)]"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={visibleStatuses[c.status]}
+                      onChange={() => toggleStatusVisibility(c.status)}
+                      className="h-3.5 w-3.5 rounded border-[var(--border)]"
+                    />
+                    <span>{c.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
       </header>
 
@@ -532,6 +572,14 @@ export function Dashboard() {
             </p>
             <p className="mt-0.5 text-2xl font-bold tabular-nums text-red-700 dark:text-red-300">
               {stats.criticalOpen}
+            </p>
+          </div>
+          <div className="ui-card flex flex-col justify-center px-4 py-3.5">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">
+              Acquittées
+            </p>
+            <p className="mt-0.5 text-2xl font-bold tabular-nums text-[var(--text)]">
+              {acknowledgedCount}
             </p>
           </div>
         </div>
@@ -580,11 +628,44 @@ export function Dashboard() {
             </label>
           </div>
         </div>
-        {importMsg ? (
-          <p className="relative mt-3 rounded-lg bg-[var(--column)] px-3 py-2 text-sm text-[var(--text)]">
-            {importMsg}
-          </p>
-        ) : null}
+        <div className="relative mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          {importMsg ? (
+            <p className="rounded-lg bg-[var(--column)] px-3 py-2 text-sm text-[var(--text)]">
+              {importMsg}
+            </p>
+          ) : (
+            <p className="text-xs text-[var(--muted)]">
+              Pour le CSV générique, vous pouvez partir d’un fichier modèle avec les colonnes obligatoires.
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              const header = "title,severity,description,externalRef\n";
+              const exampleLine =
+                'Compte administrateur dormant,MEDIUM,"Compte admin sans connexion depuis 90 jours",ADM-001\n';
+              const blob = new Blob([header + exampleLine], { type: "text/csv;charset=utf-8" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = "modele_import_vulnerabilites.csv";
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+            }}
+            className="ui-btn-secondary inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12 12 16.5M12 16.5 7.5 12M12 16.5V3"
+              />
+            </svg>
+            Télécharger un modèle CSV
+          </button>
+        </div>
       </section>
 
       {error ? (
@@ -613,7 +694,7 @@ export function Dashboard() {
           }}
         >
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-            {COLUMNS.map((col) => {
+            {COLUMNS.filter((col) => visibleStatuses[col.status]).map((col) => {
               const count = (byStatus.get(col.status) ?? []).length;
               return (
                 <div
@@ -643,6 +724,7 @@ export function Dashboard() {
                         patchStatus={patchStatus}
                         removeVuln={removeVuln}
                         setError={setError}
+                        onEdit={openEdit}
                       />
                     ))}
                   </KanbanDroppableList>
@@ -668,32 +750,32 @@ export function Dashboard() {
         </DndContext>
       )}
 
-      {addOpen ? (
+      {editOpen && editTarget ? (
         <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/45 p-4 backdrop-blur-[2px] sm:items-center">
           <div
             className="ui-card w-full max-w-md p-6 shadow-xl"
             role="dialog"
             aria-modal="true"
-            aria-labelledby="add-title"
+            aria-labelledby="edit-title"
           >
-            <h2 id="add-title" className="text-lg font-bold text-[var(--text)]">
-              Nouvelle vulnérabilité
+            <h2 id="edit-title" className="text-lg font-bold text-[var(--text)]">
+              Modifier la vulnérabilité
             </h2>
-            <form onSubmit={submitAdd} className="mt-4 flex flex-col gap-3">
+            <form onSubmit={submitEdit} className="mt-4 flex flex-col gap-3">
               <label className="text-xs font-medium text-[var(--muted)]">
                 Titre
                 <input
                   required
-                  value={addTitle}
-                  onChange={(e) => setAddTitle(e.target.value)}
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
                   className="ui-input mt-1 w-full px-3 py-2.5 text-sm"
                 />
               </label>
               <label className="text-xs font-medium text-[var(--muted)]">
                 Description
                 <textarea
-                  value={addDesc}
-                  onChange={(e) => setAddDesc(e.target.value)}
+                  value={editDesc}
+                  onChange={(e) => setEditDesc(e.target.value)}
                   rows={3}
                   className="ui-input mt-1 w-full px-3 py-2.5 text-sm"
                 />
@@ -701,8 +783,8 @@ export function Dashboard() {
               <label className="text-xs font-medium text-[var(--muted)]">
                 Sévérité
                 <select
-                  value={addSeverity}
-                  onChange={(e) => setAddSeverity(e.target.value as Severity)}
+                  value={editSeverity}
+                  onChange={(e) => setEditSeverity(e.target.value as Severity)}
                   className="ui-input mt-1 w-full px-3 py-2.5 text-sm"
                 >
                   {SEVERITY_ORDER.map((s) => (
@@ -716,95 +798,18 @@ export function Dashboard() {
                 Échéance (optionnel)
                 <input
                   type="date"
-                  value={addDue}
-                  onChange={(e) => setAddDue(e.target.value)}
+                  value={editDue}
+                  onChange={(e) => setEditDue(e.target.value)}
                   className="ui-input mt-1 w-full px-3 py-2.5 text-sm"
                 />
               </label>
               <div className="mt-2 flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setAddOpen(false)}
-                  className="ui-btn-secondary px-4 py-2.5 text-sm text-[var(--muted)]"
-                >
-                  Annuler
-                </button>
-                <button type="submit" className="ui-btn-primary px-5 py-2.5 text-sm shadow-sm">
-                  Créer
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      ) : null}
-
-      {tplOpen ? (
-        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/45 p-4 backdrop-blur-[2px] sm:items-center">
-          <div
-            className="ui-card w-full max-w-md p-6 shadow-xl"
-            role="dialog"
-            aria-modal="true"
-          >
-            <h2 className="text-lg font-bold text-[var(--text)]">Nouveau modèle de scan</h2>
-            <p className="mt-1 text-xs text-[var(--muted)]">
-              Un modèle associe un nom convivial à un parseur déjà implémenté. Pour un nouvel outil,
-              ajoutez un parseur dans le code puis enregistrez son identifiant ici.
-            </p>
-            <form onSubmit={submitTemplate} className="mt-4 flex flex-col gap-3">
-              <label className="text-xs font-medium text-[var(--muted)]">
-                Nom affiché
-                <input
-                  required
-                  value={tplName}
-                  onChange={(e) => setTplName(e.target.value)}
-                  className="ui-input mt-1 w-full px-3 py-2.5 text-sm"
-                />
-              </label>
-              <label className="text-xs font-medium text-[var(--muted)]">
-                Slug (unique, minuscules)
-                <input
-                  required
-                  value={tplSlug}
-                  onChange={(e) => setTplSlug(e.target.value.toLowerCase())}
-                  placeholder="mon-outil-export"
-                  className="ui-input mt-1 w-full px-3 py-2.5 text-sm"
-                />
-              </label>
-              <label className="text-xs font-medium text-[var(--muted)]">
-                Parseur
-                <select
-                  value={tplParser}
-                  onChange={(e) => {
-                    setTplParser(e.target.value);
-                    setTplHint(e.target.value === "pingcastle_xml" ? "*.xml" : "*.csv");
+                  onClick={() => {
+                    setEditOpen(false);
+                    setEditTarget(null);
                   }}
-                  className="ui-input mt-1 w-full px-3 py-2.5 text-sm"
-                >
-                  <option value="pingcastle_xml">PingCastle (XML)</option>
-                  <option value="generic_csv">CSV générique</option>
-                </select>
-              </label>
-              <label className="text-xs font-medium text-[var(--muted)]">
-                Indication fichier
-                <input
-                  value={tplHint}
-                  onChange={(e) => setTplHint(e.target.value)}
-                  className="ui-input mt-1 w-full px-3 py-2.5 text-sm"
-                />
-              </label>
-              <label className="text-xs font-medium text-[var(--muted)]">
-                Description
-                <textarea
-                  value={tplDesc}
-                  onChange={(e) => setTplDesc(e.target.value)}
-                  rows={2}
-                  className="ui-input mt-1 w-full px-3 py-2.5 text-sm"
-                />
-              </label>
-              <div className="mt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setTplOpen(false)}
                   className="ui-btn-secondary px-4 py-2.5 text-sm text-[var(--muted)]"
                 >
                   Annuler

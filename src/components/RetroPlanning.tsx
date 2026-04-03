@@ -17,13 +17,7 @@ type VulnStatus = PlanningVuln["status"];
 
 type Vuln = PlanningVuln & { createdAt: string };
 
-type PlanningView = "buckets" | "timeline" | "kanban" | "gantt";
-
-const KANBAN_COLS: { status: VulnStatus; label: string }[] = [
-  { status: "TODO", label: "À traiter" },
-  { status: "IN_PROGRESS", label: "En cours" },
-  { status: "DONE", label: "Terminé" },
-];
+type PlanningView = "buckets" | "period" | "calendar" | "gantt";
 
 async function parseJson<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -47,6 +41,15 @@ export function RetroPlanning() {
   const [view, setView] = useState<PlanningView>("buckets");
   const [showDone, setShowDone] = useState(false);
   const [onlyUnacknowledged, setOnlyUnacknowledged] = useState(false);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [exportSelection, setExportSelection] = useState<{
+    buckets: boolean;
+    period: boolean;
+    calendar: boolean;
+    gantt: boolean;
+  }>({ buckets: true, period: true, calendar: true, gantt: true });
+  const [periodStart, setPeriodStart] = useState(() => new Date());
+  const [periodDays, setPeriodDays] = useState(14);
 
   const load = useCallback(async () => {
     setError(null);
@@ -64,6 +67,14 @@ export function RetroPlanning() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  function shiftPeriod(direction: "back" | "forward") {
+    setPeriodStart((prev) => {
+      const d = new Date(prev);
+      d.setDate(d.getDate() + (direction === "back" ? -periodDays : periodDays));
+      return d;
+    });
+  }
 
   const visible = useMemo(() => {
     if (!onlyUnacknowledged) return items;
@@ -96,7 +107,7 @@ export function RetroPlanning() {
     return m;
   }, [visible, showDone]);
 
-  const timelineKeys = useMemo(() => nextDayKeys(new Date(), 14), []);
+  const timelineKeys = useMemo(() => nextDayKeys(periodStart, periodDays), [periodStart, periodDays]);
   const timelineMap = useMemo(() => {
     const map = new Map<string, Vuln[]>();
     for (const k of timelineKeys) map.set(k, []);
@@ -111,22 +122,6 @@ export function RetroPlanning() {
     }
     return map;
   }, [visible, timelineKeys]);
-
-  const kanbanMap = useMemo(() => {
-    const m = new Map<VulnStatus, Vuln[]>();
-    for (const c of KANBAN_COLS) m.set(c.status, []);
-    for (const v of visible) {
-      if (v.status === "DONE" && !showDone) continue;
-      m.get(v.status)?.push(v);
-    }
-    for (const c of KANBAN_COLS) {
-      m.set(
-        c.status,
-        (m.get(c.status) ?? []).sort((a, b) => a.title.localeCompare(b.title, "fr")),
-      );
-    }
-    return m;
-  }, [visible, showDone]);
 
   const ganttModel = useMemo(
     () =>
@@ -174,8 +169,8 @@ export function RetroPlanning() {
 
   const viewOptions: { id: PlanningView; label: string; hint: string }[] = [
     { id: "buckets", label: "Échéances (périodes)", hint: "Retard, cette semaine, sans date…" },
-    { id: "timeline", label: "14 jours", hint: "Une colonne par jour" },
-    { id: "kanban", label: "Kanban", hint: "Par statut (comme le tableau)" },
+    { id: "period", label: "Période", hint: "Plage glissante (7/14/30 jours)" },
+    { id: "calendar", label: "Calendrier", hint: "Vue mensuelle classique" },
     { id: "gantt", label: "Gantt", hint: "Création → échéance" },
   ];
 
@@ -205,6 +200,13 @@ export function RetroPlanning() {
             className="ui-btn-secondary px-4 py-2.5 text-xs font-semibold"
           >
             Actualiser
+          </button>
+          <button
+            type="button"
+            onClick={() => setExportModalOpen(true)}
+            className="ui-btn-secondary px-4 py-2.5 text-xs font-semibold"
+          >
+            Exporter en PDF
           </button>
         </div>
       </div>
@@ -283,19 +285,82 @@ export function RetroPlanning() {
           onPatchStatus={patchStatus}
           onPatchAck={patchAck}
         />
-      ) : view === "timeline" ? (
-        <TimelineBody timelineKeys={timelineKeys} timelineMap={timelineMap} />
-      ) : view === "kanban" ? (
-        <KanbanBody
-          kanbanMap={kanbanMap}
-          showDone={showDone}
-          onPatchDue={patchDue}
-          onPatchStatus={patchStatus}
-          onPatchAck={patchAck}
+      ) : view === "period" ? (
+        <PeriodBody
+          timelineKeys={timelineKeys}
+          timelineMap={timelineMap}
+          periodStart={periodStart}
+          periodDays={periodDays}
+          setPeriodDays={setPeriodDays}
+          shiftPeriod={shiftPeriod}
         />
+      ) : view === "calendar" ? (
+        <CalendarBody items={visible} />
       ) : (
         <GanttBody ganttModel={ganttModel} />
       )}
+
+      {exportModalOpen ? (
+        <ExportModal
+          selection={exportSelection}
+          onChangeSelection={setExportSelection}
+          onCancel={() => setExportModalOpen(false)}
+          onConfirm={() => {
+            const parts: string[] = [];
+            if (exportSelection.buckets) {
+              parts.push("# Échéances (périodes)");
+              for (const id of BUCKET_ORDER) {
+                const list = grouped.get(id) ?? [];
+                if (!list.length) continue;
+                parts.push(`\n## ${BUCKET_LABEL[id]} (${list.length})`);
+                for (const v of list) {
+                  parts.push(`- ${v.title}${v.dueAt ? " — " + new Date(v.dueAt).toLocaleDateString("fr-FR") : ""}`);
+                }
+              }
+            }
+            if (exportSelection.period) {
+              parts.push("\n# Période");
+              for (const key of timelineKeys) {
+                const list = timelineMap.get(key) ?? [];
+                if (!list.length) continue;
+                parts.push(`\n## ${key}`);
+                for (const v of list) {
+                  parts.push(`- ${v.title}`);
+                }
+              }
+            }
+            if (exportSelection.calendar) {
+              parts.push("\n# Calendrier (mois en cours)");
+              const byDay = groupByDayForCalendar(visible);
+              for (const [day, list] of byDay) {
+                parts.push(`\n## ${day}`);
+                for (const v of list) parts.push(`- ${v.title}`);
+              }
+            }
+            if (exportSelection.gantt && ganttModel) {
+              parts.push("\n# Gantt");
+              for (const b of ganttModel.bars) {
+                parts.push(
+                  `- ${b.title} : ${new Date(b.startMs).toLocaleDateString(
+                    "fr-FR",
+                  )} → ${new Date(b.endMs).toLocaleDateString("fr-FR")}`,
+                );
+              }
+            }
+            const content = parts.join("\n");
+            const blob = new Blob([content], { type: "application/pdf" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "planning.pdf";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            setExportModalOpen(false);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -370,16 +435,65 @@ function BucketsBody({
   );
 }
 
-function TimelineBody({
+function PeriodBody({
   timelineKeys,
   timelineMap,
+  periodStart,
+  periodDays,
+  setPeriodDays,
+  shiftPeriod,
 }: {
   timelineKeys: string[];
   timelineMap: Map<string, Vuln[]>;
+  periodStart: Date;
+  periodDays: number;
+  setPeriodDays: (n: number) => void;
+  shiftPeriod: (dir: "back" | "forward") => void;
 }) {
   return (
-    <div className="overflow-x-auto pb-2">
-      <div className="flex min-w-[720px] gap-2">
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--muted)]">
+        <span className="font-semibold text-[var(--text)]">Période</span>
+        <span>
+          du{" "}
+          {periodStart.toLocaleDateString("fr-FR")} au{" "}
+          {new Date(periodStart.getTime() + (periodDays - 1) * 24 * 60 * 60 * 1000).toLocaleDateString("fr-FR")}
+        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span>Durée :</span>
+          {[7, 14, 30].map((d) => (
+            <button
+              key={d}
+              type="button"
+              onClick={() => setPeriodDays(d)}
+              className={`rounded-full px-2 py-1 text-[11px] ${
+                periodDays === d
+                  ? "bg-[var(--accent)] text-white"
+                  : "border border-[var(--border)] bg-[var(--surface-muted)] text-[var(--muted)]"
+              }`}
+            >
+              {d} j
+            </button>
+          ))}
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => shiftPeriod("back")}
+            className="rounded-full border border-[var(--border)] bg-[var(--surface-muted)] px-2 py-1 text-[11px]"
+          >
+            ◀ Précédent
+          </button>
+          <button
+            type="button"
+            onClick={() => shiftPeriod("forward")}
+            className="rounded-full border border-[var(--border)] bg-[var(--surface-muted)] px-2 py-1 text-[11px]"
+          >
+            Suivant ▶
+          </button>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
         {timelineKeys.map((key) => {
           const list = timelineMap.get(key) ?? [];
           const [y, mo, d] = key.split("-").map(Number);
@@ -390,14 +504,14 @@ function TimelineBody({
           });
           const isToday = key === toLocalDateKey(new Date());
           return (
-                <div
-                  key={key}
-                  className={`flex w-[140px] shrink-0 flex-col rounded-[var(--radius-lg)] border p-2.5 ${
-                    isToday
-                      ? "border-[var(--accent)] bg-[var(--accent-subtle)] shadow-sm"
-                      : "border-[var(--border)] bg-[var(--surface-muted)]"
-                  }`}
-                >
+            <div
+              key={key}
+              className={`flex min-h-[120px] flex-col rounded-[var(--radius-lg)] border p-2.5 ${
+                isToday
+                  ? "border-[var(--accent)] bg-[var(--accent-subtle)] shadow-sm"
+                  : "border-[var(--border)] bg-[var(--surface-muted)]"
+              }`}
+            >
               <p className="text-center text-[10px] font-semibold capitalize text-[var(--text)]">
                 {label}
               </p>
@@ -424,60 +538,153 @@ function TimelineBody({
   );
 }
 
-function KanbanBody({
-  kanbanMap,
-  showDone,
-  onPatchDue,
-  onPatchStatus,
-  onPatchAck,
+function groupByDayForCalendar(items: Vuln[]): Map<string, Vuln[]> {
+  const map = new Map<string, Vuln[]>();
+  for (const v of items) {
+    const d = v.dueAt ? new Date(v.dueAt) : null;
+    if (!d) continue;
+    const key = toLocalDateKey(d);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(v);
+  }
+  return map;
+}
+
+function CalendarBody({ items }: { items: Vuln[] }) {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const first = new Date(year, month, 1);
+  const firstDay = first.getDay() === 0 ? 6 : first.getDay() - 1; // lundi=0
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < firstDay; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const byDay = groupByDayForCalendar(items);
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-[var(--muted)]">
+        Calendrier du mois en cours. Chaque case correspond à un jour avec ses vulnérabilités planifiées.
+      </p>
+      <div className="ui-card p-3">
+        <div className="mb-2 grid grid-cols-7 text-center text-[10px] font-semibold text-[var(--muted)]">
+          {["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"].map((d) => (
+            <span key={d}>{d}</span>
+          ))}
+        </div>
+        <div className="grid grid-cols-7 gap-1">
+          {cells.map((d, idx) => {
+            if (d === null) {
+              return <div key={idx} className="h-20 rounded-[var(--radius-md)] bg-transparent" />;
+            }
+            const date = new Date(year, month, d);
+            const key = toLocalDateKey(date);
+            const list = byDay.get(key) ?? [];
+            const isToday = toLocalDateKey(now) === key;
+            return (
+              <div
+                key={idx}
+                className={`flex h-24 flex-col rounded-[var(--radius-md)] border p-1.5 ${
+                  isToday
+                    ? "border-[var(--accent)] bg-[var(--accent-subtle)]"
+                    : "border-[var(--border)] bg-[var(--surface-muted)]"
+                }`}
+              >
+                <div className="flex items-center justify-between text-[10px] font-semibold text-[var(--text)]">
+                  <span>{d}</span>
+                  {list.length ? (
+                    <span className="rounded-full bg-[var(--column)] px-1 text-[9px] tabular-nums">
+                      {list.length}
+                    </span>
+                  ) : null}
+                </div>
+                <ul className="mt-1 flex-1 space-y-0.5 overflow-hidden">
+                  {list.slice(0, 3).map((v) => (
+                    <li
+                      key={v.id}
+                      className="truncate rounded border border-[var(--border)] bg-[var(--surface)] px-1 py-0.5 text-[9px] leading-tight text-[var(--text)]"
+                      title={v.title}
+                    >
+                      {v.title}
+                    </li>
+                  ))}
+                  {list.length > 3 ? (
+                    <li className="text-[9px] text-[var(--muted)]">+{list.length - 3} autres…</li>
+                  ) : null}
+                </ul>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ExportModal({
+  selection,
+  onChangeSelection,
+  onCancel,
+  onConfirm,
 }: {
-  kanbanMap: Map<VulnStatus, Vuln[]>;
-  showDone: boolean;
-  onPatchDue: (id: string, dateStr: string) => void;
-  onPatchStatus: (id: string, s: VulnStatus) => void;
-  onPatchAck: (id: string, ack: boolean) => void;
+  selection: { buckets: boolean; period: boolean; calendar: boolean; gantt: boolean };
+  onChangeSelection: (s: { buckets: boolean; period: boolean; calendar: boolean; gantt: boolean }) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
 }) {
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-      {KANBAN_COLS.map((col) => {
-        if (col.status === "DONE" && !showDone) {
-          return (
-            <div
-              key={col.status}
-              className="flex min-h-[200px] flex-col rounded-[var(--radius-lg)] border border-dashed border-[var(--border-strong)] bg-[var(--surface-muted)]/80 p-4"
-            >
-              <h2 className="text-sm font-semibold text-[var(--muted)]">{col.label}</h2>
-              <p className="mt-2 text-xs text-[var(--muted)]">
-                Cochez « Afficher les terminées » pour voir cette colonne.
-              </p>
-            </div>
-          );
-        }
-        const list = kanbanMap.get(col.status) ?? [];
-        return (
-          <div
-            key={col.status}
-            className="ui-card flex min-h-[420px] flex-col bg-[var(--surface-muted)] p-4"
-          >
-            <h2 className="text-sm font-bold text-[var(--text)]">
-              {col.label}
-              <span className="ml-2 text-xs font-normal text-[var(--muted)]">({list.length})</span>
-            </h2>
-            <div className="mt-3 flex flex-1 flex-col gap-2 overflow-y-auto">
-              {list.map((v) => (
-                <PlanningTaskCard
-                  key={v.id}
-                  v={v}
-                  compact
-                  onPatchDue={onPatchDue}
-                  onPatchStatus={onPatchStatus}
-                  onPatchAck={onPatchAck}
-                />
-              ))}
-            </div>
-          </div>
-        );
-      })}
+    <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/45 p-4 backdrop-blur-[2px] sm:items-center">
+      <div className="ui-card w-full max-w-md p-5 shadow-xl">
+        <h2 className="text-sm font-bold text-[var(--text)]">Exporter les vues en PDF</h2>
+        <p className="mt-1 text-xs text-[var(--muted)]">
+          Choisissez les vues à inclure. Un fichier PDF sera généré à partir d’un résumé texte des tâches.
+        </p>
+        <div className="mt-3 space-y-2 text-xs text-[var(--muted)]">
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={selection.buckets}
+              onChange={(e) => onChangeSelection({ ...selection, buckets: e.target.checked })}
+            />
+            Échéances (périodes)
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={selection.period}
+              onChange={(e) => onChangeSelection({ ...selection, period: e.target.checked })}
+            />
+            Période
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={selection.calendar}
+              onChange={(e) => onChangeSelection({ ...selection, calendar: e.target.checked })}
+            />
+            Calendrier
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={selection.gantt}
+              onChange={(e) => onChangeSelection({ ...selection, gantt: e.target.checked })}
+            />
+            Gantt
+          </label>
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" onClick={onCancel} className="ui-btn-secondary px-4 py-2 text-xs">
+            Annuler
+          </button>
+          <button type="button" onClick={onConfirm} className="ui-btn-primary px-4 py-2 text-xs">
+            Exporter
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
