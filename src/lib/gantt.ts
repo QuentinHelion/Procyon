@@ -41,7 +41,7 @@ export function buildGanttModel(
   items: GanttVulnInput[],
   options: { showDone: boolean; minBarDays: number; tailPaddingDays: number },
 ): GanttModel | null {
-  const visible = items.filter((v) => options.showDone || v.status !== "DONE");
+  const visible = items.filter((v) => options.showDone || (v.status !== "DONE" && v.status !== "ARCHIVE"));
   if (visible.length === 0) return null;
 
   const now = Date.now();

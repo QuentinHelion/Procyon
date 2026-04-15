@@ -13,7 +13,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 type Severity = "INFO" | "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
-type VulnStatus = "TODO" | "IN_PROGRESS" | "DONE";
+type VulnStatus = "TODO" | "IN_PROGRESS" | "DONE" | "ARCHIVE";
 type VulnSource = "MANUAL" | "IMPORT";
 
 type Template = {
@@ -48,6 +48,7 @@ const COLUMNS: { status: VulnStatus; label: string; hint: string }[] = [
   { status: "TODO", label: "À traiter", hint: "Comme la liste « Planifié » dans To Do" },
   { status: "IN_PROGRESS", label: "En cours", hint: "Analyse ou remédiation en cours" },
   { status: "DONE", label: "Terminé", hint: "Clos ou accepté" },
+  { status: "ARCHIVE", label: "Acquitté", hint: "Alertes acquittées et inactives" },
 ];
 
 const SEVERITY_ORDER: Severity[] = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"];
@@ -97,6 +98,13 @@ function ColumnIcon({ status }: { status: VulnStatus }) {
       </svg>
     );
   }
+  if (status === "ARCHIVE") {
+    return (
+      <svg className={c} fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 7.5h18M6 7.5v11.25A2.25 2.25 0 008.25 21h7.5A2.25 2.25 0 0018 18.75V7.5M9.75 11.25h4.5" />
+      </svg>
+    );
+  }
   return (
     <svg className={c} fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
       <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -105,7 +113,7 @@ function ColumnIcon({ status }: { status: VulnStatus }) {
 }
 
 function isVulnStatus(id: string | number): id is VulnStatus {
-  return id === "TODO" || id === "IN_PROGRESS" || id === "DONE";
+  return id === "TODO" || id === "IN_PROGRESS" || id === "DONE" || id === "ARCHIVE";
 }
 
 function KanbanDroppableList({
@@ -201,7 +209,7 @@ function DashboardDraggableVulnCard({
               </button>
             </div>
           </div>
-          {v.status !== "DONE" && !v.acknowledgedAt ? (
+          {v.status !== "DONE" && v.status !== "ARCHIVE" && !v.acknowledgedAt ? (
             <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/[0.08] px-2.5 py-2 dark:bg-amber-500/10">
               <svg
                 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400"
@@ -256,13 +264,21 @@ function DashboardDraggableVulnCard({
             className="mt-4 flex flex-col gap-2 border-t border-[var(--border)] pt-3"
             onPointerDown={(e) => e.stopPropagation()}
           >
-            {v.status !== "DONE" && !v.acknowledgedAt ? (
+            {v.status !== "DONE" && v.status !== "ARCHIVE" && !v.acknowledgedAt ? (
               <button
                 type="button"
                 onClick={() => void patchAcknowledge(v.id, true)}
-                className="w-full rounded-lg bg-gradient-to-r from-amber-500/90 to-amber-600/90 px-3 py-2 text-center text-xs font-semibold text-amber-950 shadow-sm transition hover:from-amber-500 hover:to-amber-600 dark:from-amber-400/90 dark:to-amber-500/90 dark:text-amber-950"
+                className="self-start rounded-md border border-amber-500/35 bg-amber-500/10 px-2 py-1 text-[10px] font-medium text-amber-900 transition hover:bg-amber-500/15 dark:text-amber-100"
               >
-                J’ai pris connaissance de l’alerte
+                Acquitter
+              </button>
+            ) : v.status === "ARCHIVE" ? (
+              <button
+                type="button"
+                onClick={() => void patchAcknowledge(v.id, false)}
+                className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-center text-xs font-medium text-[var(--muted)] transition hover:text-[var(--text)]"
+              >
+                Réactiver l’alerte
               </button>
             ) : v.status !== "DONE" && v.acknowledgedAt ? (
               <button
@@ -274,7 +290,8 @@ function DashboardDraggableVulnCard({
               </button>
             ) : null}
             <div className="flex flex-wrap gap-1.5">
-              {COLUMNS.filter((c) => c.status !== v.status).map((c) => (
+              {v.status !== "ARCHIVE"
+                ? COLUMNS.filter((c) => c.status !== v.status).map((c) => (
                 <button
                   key={c.status}
                   type="button"
@@ -283,7 +300,8 @@ function DashboardDraggableVulnCard({
                 >
                   {c.label}
                 </button>
-              ))}
+                  ))
+                : null}
               <button
                 type="button"
                 onClick={() => void removeVuln(v.id).catch((err) => setError(String(err)))}
@@ -312,6 +330,12 @@ export function Dashboard() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [addOpen, setAddOpen] = useState(false);
+  const [addTitle, setAddTitle] = useState("");
+  const [addDesc, setAddDesc] = useState("");
+  const [addSeverity, setAddSeverity] = useState<Severity>("MEDIUM");
+  const [addDue, setAddDue] = useState("");
 
   const [editOpen, setEditOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Vuln | null>(null);
@@ -367,13 +391,13 @@ export function Dashboard() {
   }, [vulns]);
 
   const stats = useMemo(() => {
-    const open = vulns.filter((v) => v.status !== "DONE");
-    const unacked = open.filter((v) => !v.acknowledgedAt).length;
+    const open = vulns.filter((v) => v.status !== "DONE" && v.status !== "ARCHIVE");
+    const inProgress = vulns.filter((v) => v.status === "IN_PROGRESS").length;
     const criticalOpen = open.filter((v) => v.severity === "CRITICAL").length;
     return {
       total: vulns.length,
       open: open.length,
-      unacked,
+      inProgress,
       criticalOpen,
     };
   }, [vulns]);
@@ -382,22 +406,75 @@ export function Dashboard() {
     TODO: true,
     IN_PROGRESS: true,
     DONE: true,
+    ARCHIVE: false,
   });
   const [showColumnSettings, setShowColumnSettings] = useState(false);
+  const [columnSeverityFilters, setColumnSeverityFilters] = useState<
+    Record<VulnStatus, Record<Severity, boolean>>
+  >({
+    TODO: { CRITICAL: true, HIGH: true, MEDIUM: true, LOW: true, INFO: true },
+    IN_PROGRESS: { CRITICAL: true, HIGH: true, MEDIUM: true, LOW: true, INFO: true },
+    DONE: { CRITICAL: true, HIGH: true, MEDIUM: true, LOW: true, INFO: true },
+    ARCHIVE: { CRITICAL: true, HIGH: true, MEDIUM: true, LOW: true, INFO: true },
+  });
 
   const acknowledgedCount = useMemo(
     () => vulns.filter((v) => !!v.acknowledgedAt).length,
     [vulns],
   );
 
+  function toggleSeverityForColumn(status: VulnStatus, severity: Severity) {
+    setColumnSeverityFilters((prev) => {
+      const next = {
+        ...prev,
+        [status]: {
+          ...prev[status],
+          [severity]: !prev[status][severity],
+        },
+      };
+      if (!Object.values(next[status]).some(Boolean)) return prev;
+      return next;
+    });
+  }
+
   function toggleStatusVisibility(status: VulnStatus) {
     setVisibleStatuses((prev) => {
       const next = { ...prev, [status]: !prev[status] };
-      if (!next.TODO && !next.IN_PROGRESS && !next.DONE) {
+      if (!next.TODO && !next.IN_PROGRESS && !next.DONE && !next.ARCHIVE) {
         return prev;
       }
       return next;
     });
+  }
+
+  async function submitAdd(e: React.FormEvent) {
+    e.preventDefault();
+    const dueIso =
+      addDue.trim() === ""
+        ? undefined
+        : new Date(`${addDue}T12:00:00`).toISOString();
+    if (addDue.trim() !== "" && Number.isNaN(new Date(dueIso!).getTime())) {
+      setError("Date d’échéance invalide");
+      return;
+    }
+    const res = await fetch("/api/vulnerabilities", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: addTitle,
+        description: addDesc || undefined,
+        severity: addSeverity,
+        status: "TODO",
+        ...(dueIso !== undefined ? { dueAt: dueIso } : {}),
+      }),
+    });
+    const created = await parseJson<Vuln>(res);
+    setVulns((prev) => [created, ...prev]);
+    setAddOpen(false);
+    setAddTitle("");
+    setAddDesc("");
+    setAddSeverity("MEDIUM");
+    setAddDue("");
   }
 
   async function patchStatus(id: string, status: VulnStatus) {
@@ -509,6 +586,16 @@ export function Dashboard() {
         <div className="relative flex shrink-0 flex-wrap items-start gap-2">
           <button
             type="button"
+            onClick={() => setAddOpen(true)}
+            className="ui-btn-primary inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold shadow-sm"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            Ajouter une tâche
+          </button>
+          <button
+            type="button"
             onClick={() => setShowColumnSettings((v) => !v)}
             className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface-muted)] text-[var(--muted)] shadow-sm transition hover:border-[var(--accent)] hover:bg-[var(--accent-subtle)] hover:text-[var(--text)]"
             aria-label="Paramètres d’affichage des colonnes"
@@ -558,12 +645,12 @@ export function Dashboard() {
             <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">Ouvertes</p>
             <p className="mt-0.5 text-2xl font-bold tabular-nums text-[var(--accent)]">{stats.open}</p>
           </div>
-          <div className="ui-card flex flex-col justify-center border-amber-500/20 bg-amber-500/[0.06] px-4 py-3.5 dark:bg-amber-500/10">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-amber-800 dark:text-amber-200/90">
-              À acquitter
+          <div className="ui-card flex flex-col justify-center border-sky-500/20 bg-sky-500/[0.06] px-4 py-3.5 dark:bg-sky-500/10">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-sky-800 dark:text-sky-200/90">
+              En cours
             </p>
-            <p className="mt-0.5 text-2xl font-bold tabular-nums text-amber-900 dark:text-amber-100">
-              {stats.unacked}
+            <p className="mt-0.5 text-2xl font-bold tabular-nums text-sky-900 dark:text-sky-100">
+              {stats.inProgress}
             </p>
           </div>
           <div className="ui-card flex flex-col justify-center border-red-500/15 bg-red-500/[0.04] px-4 py-3.5 dark:bg-red-500/10">
@@ -584,6 +671,7 @@ export function Dashboard() {
           </div>
         </div>
       ) : null}
+
 
       <section className="ui-card relative mb-8 overflow-hidden p-5 lg:p-6">
         <div className="pointer-events-none absolute inset-y-0 right-0 w-32 bg-gradient-to-l from-[var(--accent-subtle)] to-transparent opacity-60" />
@@ -693,9 +781,20 @@ export function Dashboard() {
             );
           }}
         >
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <div
+            className="grid gap-6 transition-all duration-300 ease-out"
+            style={{
+              gridTemplateColumns: `repeat(${Math.max(
+                1,
+                COLUMNS.filter((col) => visibleStatuses[col.status]).length,
+              )}, minmax(0, 1fr))`,
+            }}
+          >
             {COLUMNS.filter((col) => visibleStatuses[col.status]).map((col) => {
-              const count = (byStatus.get(col.status) ?? []).length;
+              const filteredColumnItems = (byStatus.get(col.status) ?? []).filter(
+                (v) => columnSeverityFilters[col.status][v.severity],
+              );
+              const count = filteredColumnItems.length;
               return (
                 <div
                   key={col.status}
@@ -709,6 +808,27 @@ export function Dashboard() {
                       <div>
                         <h2 className="text-sm font-bold text-[var(--text)]">{col.label}</h2>
                         <p className="mt-0.5 text-[11px] leading-snug text-[var(--muted)]">{col.hint}</p>
+                        <details className="relative mt-1">
+                          <summary className="inline-flex list-none cursor-pointer items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--surface-muted)] px-2 py-1 text-[10px] font-medium text-[var(--muted)]">
+                            Filtres
+                          </summary>
+                          <div className="absolute left-0 z-20 mt-1 w-44 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-2 shadow-xl">
+                            <p className="mb-1 text-[10px] uppercase tracking-wide text-[var(--muted)]">Criticités</p>
+                            <div className="space-y-1.5">
+                              {SEVERITY_ORDER.map((sev) => (
+                                <label key={sev} className="flex items-center gap-2 text-[10px] text-[var(--muted)]">
+                                  <input
+                                    type="checkbox"
+                                    checked={columnSeverityFilters[col.status][sev]}
+                                    onChange={() => toggleSeverityForColumn(col.status, sev)}
+                                    className="h-3 w-3 rounded border-[var(--border)]"
+                                  />
+                                  <span>{severityLabel[sev]}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        </details>
                       </div>
                     </div>
                     <span className="shrink-0 rounded-full bg-[var(--column)] px-2.5 py-0.5 text-center text-xs font-bold tabular-nums text-[var(--text)] ring-1 ring-[var(--border)]">
@@ -716,7 +836,7 @@ export function Dashboard() {
                     </span>
                   </div>
                   <KanbanDroppableList status={col.status}>
-                    {(byStatus.get(col.status) ?? []).map((v) => (
+                    {filteredColumnItems.map((v) => (
                       <DashboardDraggableVulnCard
                         key={v.id}
                         v={v}
@@ -816,6 +936,76 @@ export function Dashboard() {
                 </button>
                 <button type="submit" className="ui-btn-primary px-5 py-2.5 text-sm shadow-sm">
                   Enregistrer
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {addOpen ? (
+        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/45 p-4 backdrop-blur-[2px] sm:items-center">
+          <div
+            className="ui-card w-full max-w-md p-6 shadow-xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="add-title"
+          >
+            <h2 id="add-title" className="text-lg font-bold text-[var(--text)]">
+              Nouvelle vulnérabilité
+            </h2>
+            <form onSubmit={submitAdd} className="mt-4 flex flex-col gap-3">
+              <label className="text-xs font-medium text-[var(--muted)]">
+                Titre
+                <input
+                  required
+                  value={addTitle}
+                  onChange={(e) => setAddTitle(e.target.value)}
+                  className="ui-input mt-1 w-full px-3 py-2.5 text-sm"
+                />
+              </label>
+              <label className="text-xs font-medium text-[var(--muted)]">
+                Description
+                <textarea
+                  value={addDesc}
+                  onChange={(e) => setAddDesc(e.target.value)}
+                  rows={3}
+                  className="ui-input mt-1 w-full px-3 py-2.5 text-sm"
+                />
+              </label>
+              <label className="text-xs font-medium text-[var(--muted)]">
+                Sévérité
+                <select
+                  value={addSeverity}
+                  onChange={(e) => setAddSeverity(e.target.value as Severity)}
+                  className="ui-input mt-1 w-full px-3 py-2.5 text-sm"
+                >
+                  {SEVERITY_ORDER.map((s) => (
+                    <option key={s} value={s}>
+                      {severityLabel[s]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs font-medium text-[var(--muted)]">
+                Échéance (optionnel)
+                <input
+                  type="date"
+                  value={addDue}
+                  onChange={(e) => setAddDue(e.target.value)}
+                  className="ui-input mt-1 w-full px-3 py-2.5 text-sm"
+                />
+              </label>
+              <div className="mt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAddOpen(false)}
+                  className="ui-btn-secondary px-4 py-2.5 text-sm text-[var(--muted)]"
+                >
+                  Annuler
+                </button>
+                <button type="submit" className="ui-btn-primary px-5 py-2.5 text-sm shadow-sm">
+                  Créer
                 </button>
               </div>
             </form>

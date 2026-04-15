@@ -1,12 +1,14 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import type { LocaleMode } from "./LocaleProvider";
+import { useLocale } from "./LocaleProvider";
 import type { ThemeMode } from "./ThemeProvider";
 import { useTheme } from "./ThemeProvider";
 
 export function SettingsMenu() {
   const { mode, setMode, resolved } = useTheme();
+  const { locale, mode: localeMode, setMode: setLocaleMode } = useLocale();
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -30,9 +32,14 @@ export function SettingsMenu() {
   }, [open]);
 
   const themeOptions: { value: ThemeMode; label: string }[] = [
-    { value: "light", label: "Clair" },
-    { value: "dark", label: "Sombre" },
-    { value: "system", label: "Auto" },
+    { value: "light", label: locale === "fr" ? "Clair" : "Light" },
+    { value: "dark", label: locale === "fr" ? "Sombre" : "Dark" },
+    { value: "system", label: locale === "fr" ? "Auto" : "Auto" },
+  ];
+  const localeOptions: { value: LocaleMode; label: string }[] = [
+    { value: "auto", label: locale === "fr" ? "Auto (navigateur)" : "Auto (browser)" },
+    { value: "en", label: "English" },
+    { value: "fr", label: "Français" },
   ];
 
   return (
@@ -60,7 +67,7 @@ export function SettingsMenu() {
           />
           <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
         </svg>
-        <span className="hidden text-sm font-semibold lg:inline">Paramètres</span>
+        <span className="hidden text-sm font-semibold lg:inline">{locale === "fr" ? "Paramètres" : "Settings"}</span>
       </button>
 
       {open ? (
@@ -69,15 +76,15 @@ export function SettingsMenu() {
           className="fixed bottom-4 left-[4.25rem] z-[100] w-[min(calc(100vw-2rem),18rem)] rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-xl lg:absolute lg:bottom-full lg:left-0 lg:mb-2 lg:ml-0 lg:w-72"
           style={{ boxShadow: "var(--shadow-card), 0 12px 40px rgba(15,23,42,0.12)" }}
           role="dialog"
-          aria-label="Paramètres"
+          aria-label={locale === "fr" ? "Paramètres" : "Settings"}
         >
-          <h2 className="text-sm font-semibold text-[var(--text)]">Paramètres</h2>
+          <h2 className="text-sm font-semibold text-[var(--text)]">{locale === "fr" ? "Paramètres" : "Settings"}</h2>
 
           <div className="mt-4">
-            <p className="text-xs font-medium text-[var(--muted)]">Thème</p>
+            <p className="text-xs font-medium text-[var(--muted)]">{locale === "fr" ? "Thème" : "Theme"}</p>
             <p className="mt-0.5 text-[10px] text-[var(--muted)]">
-              Rendu : {resolved === "dark" ? "sombre" : "clair"}
-              {mode === "system" ? " · suit le système" : ""}
+              {locale === "fr" ? "Rendu :" : "Render:"} {resolved === "dark" ? (locale === "fr" ? "sombre" : "dark") : locale === "fr" ? "clair" : "light"}
+              {mode === "system" ? (locale === "fr" ? " · suit le système" : " · follows system") : ""}
             </p>
             <div className="mt-2 grid grid-cols-3 gap-1 rounded-lg bg-[var(--column)] p-1">
               {themeOptions.map((o) => (
@@ -87,6 +94,26 @@ export function SettingsMenu() {
                   onClick={() => setMode(o.value)}
                   className={`rounded-md px-2 py-2 text-center text-xs font-semibold transition ${
                     mode === o.value
+                      ? "bg-[var(--surface)] text-[var(--accent)] shadow-sm ring-1 ring-[var(--border)]"
+                      : "text-[var(--muted)] hover:text-[var(--text)]"
+                  }`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-5 border-t border-[var(--border)] pt-4">
+            <p className="text-xs font-medium text-[var(--muted)]">{locale === "fr" ? "Langue" : "Language"}</p>
+            <div className="mt-2 grid grid-cols-1 gap-1 rounded-lg bg-[var(--column)] p-1">
+              {localeOptions.map((o) => (
+                <button
+                  key={o.value}
+                  type="button"
+                  onClick={() => setLocaleMode(o.value)}
+                  className={`rounded-md px-2 py-2 text-left text-xs font-semibold transition ${
+                    localeMode === o.value
                       ? "bg-[var(--surface)] text-[var(--accent)] shadow-sm ring-1 ring-[var(--border)]"
                       : "text-[var(--muted)] hover:text-[var(--text)]"
                   }`}

@@ -78,11 +78,11 @@ export function bucketForOpenTask(dueAt: Date | null, now: Date): PlanningBucket
 }
 
 export function bucketForTask(
-  status: "TODO" | "IN_PROGRESS" | "DONE",
+  status: "TODO" | "IN_PROGRESS" | "DONE" | "ARCHIVE",
   dueAt: Date | null,
   now: Date,
 ): PlanningBucketId {
-  if (status === "DONE") return "done";
+  if (status === "DONE" || status === "ARCHIVE") return "done";
   return bucketForOpenTask(dueAt, now);
 }
 

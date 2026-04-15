@@ -19,6 +19,7 @@ enum VulnStatus {
   TODO
   IN_PROGRESS
   DONE
+  ARCHIVE
 }
 
 enum VulnSource {

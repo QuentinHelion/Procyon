@@ -2,28 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useLocale } from "@/components/LocaleProvider";
 import { SettingsMenu } from "@/components/SettingsMenu";
-
-const links = [
-  {
-    href: "/",
-    label: "Tableau",
-    description: "Vue Kanban",
-    icon: IconBoard,
-  },
-  {
-    href: "/planning",
-    label: "Planning",
-    description: "Échéances & Gantt",
-    icon: IconPlanning,
-  },
-  {
-    href: "/rapports",
-    label: "Rapports",
-    description: "Fichiers archivés",
-    icon: IconReports,
-  },
-] as const;
 
 function IconBoard(props: { className?: string }) {
   return (
@@ -50,12 +30,40 @@ function IconReports(props: { className?: string }) {
 }
 
 export function AppSidebar() {
+  const { locale } = useLocale();
   const pathname = usePathname();
+  const t = (en: string, fr: string) => (locale === "fr" ? fr : en);
+  const links = [
+    {
+      href: "/",
+      label: t("Overview", "Vue principale"),
+      description: t("Monitoring widgets", "Widgets monitoring"),
+      icon: IconBoard,
+    },
+    {
+      href: "/kanban",
+      label: "Kanban",
+      description: t("Operational board", "Pilotage opérationnel"),
+      icon: IconBoard,
+    },
+    {
+      href: "/planning",
+      label: t("Planning", "Planning"),
+      description: t("Deadlines & Gantt", "Échéances & Gantt"),
+      icon: IconPlanning,
+    },
+    {
+      href: "/rapports",
+      label: t("Reports", "Rapports"),
+      description: t("Archived files", "Fichiers archivés"),
+      icon: IconReports,
+    },
+  ] as const;
 
   return (
     <aside
       className="relative z-40 flex w-[4.25rem] shrink-0 flex-col self-stretch border-r border-[var(--sidebar-border)] bg-[var(--sidebar-bg)] lg:w-60"
-      aria-label="Navigation"
+      aria-label={t("Navigation", "Navigation")}
     >
       <div className="flex h-16 items-center justify-center border-b border-[var(--sidebar-border)] px-3 lg:justify-start lg:px-5">
         <Link href="/" className="flex items-center gap-3">
@@ -66,12 +74,14 @@ export function AppSidebar() {
           </span>
           <div className="hidden min-w-0 lg:block">
             <p className="truncate text-sm font-bold tracking-tight text-[var(--sidebar-text)]">Procyon</p>
-            <p className="truncate text-[11px] font-medium text-[var(--sidebar-muted)]">Posture & vulnérabilités</p>
+            <p className="truncate text-[11px] font-medium text-[var(--sidebar-muted)]">
+              {t("Posture & vulnerabilities", "Posture & vulnérabilités")}
+            </p>
           </div>
         </Link>
       </div>
 
-      <nav className="flex flex-1 flex-col gap-1 p-2 lg:p-3" aria-label="Sections">
+      <nav className="flex flex-1 flex-col gap-1 p-2 lg:p-3" aria-label={t("Sections", "Sections")}>
         {links.map(({ href, label, description, icon: Icon }) => {
           const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
           return (

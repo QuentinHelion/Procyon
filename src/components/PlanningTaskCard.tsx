@@ -8,7 +8,7 @@ export type PlanningVuln = {
   title: string;
   description: string | null;
   severity: "INFO" | "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
-  status: "TODO" | "IN_PROGRESS" | "DONE";
+  status: "TODO" | "IN_PROGRESS" | "DONE" | "ARCHIVE";
   dueAt: string | null;
   acknowledgedAt: string | null;
 };
@@ -52,7 +52,7 @@ export function PlanningTaskCard({
   onPatchAck,
 }: Props) {
   const dateVal = toDateInputValue(v.dueAt);
-  const unacked = v.status !== "DONE" && !v.acknowledgedAt;
+  const unacked = v.status !== "DONE" && v.status !== "ARCHIVE" && !v.acknowledgedAt;
 
   return (
     <div
@@ -68,7 +68,7 @@ export function PlanningTaskCard({
             >
               {severityLabel[v.severity]}
             </span>
-            <span className="text-[10px] text-[var(--muted)]">{v.status.replace("_", " ")}</span>
+            <span className="text-[10px] text-[var(--muted)]">{v.status === "ARCHIVE" ? "ARCHIVÉE" : v.status.replace("_", " ")}</span>
             {unacked ? (
               <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase text-amber-800 dark:text-amber-200">
                 Non acquittée
@@ -109,7 +109,7 @@ export function PlanningTaskCard({
             </span>
           )}
           <div className="flex flex-wrap gap-1">
-            {v.status !== "DONE" ? (
+            {v.status !== "DONE" && v.status !== "ARCHIVE" ? (
               v.acknowledgedAt ? (
                 <button
                   type="button"
@@ -128,7 +128,7 @@ export function PlanningTaskCard({
                 </button>
               )
             ) : null}
-            {v.status !== "IN_PROGRESS" ? (
+            {v.status !== "IN_PROGRESS" && v.status !== "ARCHIVE" ? (
               <button
                 type="button"
                 onClick={() => onPatchStatus(v.id, "IN_PROGRESS")}
@@ -137,13 +137,21 @@ export function PlanningTaskCard({
                 En cours
               </button>
             ) : null}
-            {v.status !== "DONE" ? (
+            {v.status !== "DONE" && v.status !== "ARCHIVE" ? (
               <button
                 type="button"
                 onClick={() => onPatchStatus(v.id, "DONE")}
                 className="rounded border border-[var(--border)] px-2 py-0.5 text-[10px] hover:bg-[var(--column)]"
               >
                 Terminer
+              </button>
+            ) : v.status === "ARCHIVE" ? (
+              <button
+                type="button"
+                onClick={() => onPatchStatus(v.id, "TODO")}
+                className="rounded border border-[var(--border)] px-2 py-0.5 text-[10px] hover:bg-[var(--column)]"
+              >
+                Réactiver
               </button>
             ) : (
               <button

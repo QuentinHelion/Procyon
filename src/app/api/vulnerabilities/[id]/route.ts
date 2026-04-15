@@ -20,6 +20,8 @@ export async function PATCH(request: Request, context: Ctx) {
   }
   const b = body as Record<string, unknown>;
   const data: Record<string, unknown> = {};
+  let shouldRememberPreviousStatus = false;
+  let shouldRestorePreviousStatus = false;
 
   if (typeof b.title === "string") {
     const t = b.title.trim();
@@ -55,18 +57,28 @@ export async function PATCH(request: Request, context: Ctx) {
   if ("acknowledgedAt" in b) {
     if (b.acknowledgedAt === null || b.acknowledgedAt === false) {
       data.acknowledgedAt = null;
+      if (!("status" in b)) shouldRestorePreviousStatus = true;
     } else if (b.acknowledgedAt === true) {
       data.acknowledgedAt = new Date();
+      if (!("status" in b)) {
+        data.status = VulnStatus.ARCHIVE;
+        shouldRememberPreviousStatus = true;
+      }
     } else if (typeof b.acknowledgedAt === "string") {
       const t = b.acknowledgedAt.trim();
       if (!t) {
         data.acknowledgedAt = null;
+        if (!("status" in b)) shouldRestorePreviousStatus = true;
       } else {
         const d = new Date(t);
         if (Number.isNaN(d.getTime())) {
           return NextResponse.json({ error: "acknowledgedAt invalide" }, { status: 400 });
         }
         data.acknowledgedAt = d;
+        if (!("status" in b)) {
+          data.status = VulnStatus.ARCHIVE;
+          shouldRememberPreviousStatus = true;
+        }
       }
     } else {
       return NextResponse.json(
@@ -81,6 +93,40 @@ export async function PATCH(request: Request, context: Ctx) {
   }
 
   try {
+    if (shouldRememberPreviousStatus || shouldRestorePreviousStatus) {
+      const current = await prisma.vulnerability.findUnique({
+        where: { id },
+        select: { status: true, metadata: true },
+      });
+      if (!current) {
+        return NextResponse.json({ error: "Non trouvé" }, { status: 404 });
+      }
+      const currentMeta =
+        current.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata)
+          ? (current.metadata as Record<string, unknown>)
+          : {};
+
+      if (shouldRememberPreviousStatus) {
+        if (current.status !== VulnStatus.ARCHIVE) {
+          data.metadata = {
+            ...currentMeta,
+            archivedFromStatus: current.status,
+          };
+        }
+      } else if (shouldRestorePreviousStatus) {
+        const from = currentMeta.archivedFromStatus;
+        if (from === VulnStatus.TODO || from === VulnStatus.IN_PROGRESS || from === VulnStatus.DONE) {
+          data.status = from;
+        } else {
+          data.status = VulnStatus.TODO;
+        }
+        data.metadata = {
+          ...currentMeta,
+          archivedFromStatus: null,
+        };
+      }
+    }
+
     const updated = await prisma.vulnerability.update({
       where: { id },
       data,

@@ -78,7 +78,7 @@ export function RetroPlanning() {
 
   const visible = useMemo(() => {
     if (!onlyUnacknowledged) return items;
-    return items.filter((v) => v.status !== "DONE" && !v.acknowledgedAt);
+    return items.filter((v) => v.status !== "DONE" && v.status !== "ARCHIVE" && !v.acknowledgedAt);
   }, [items, onlyUnacknowledged]);
 
   const grouped = useMemo(() => {
@@ -112,7 +112,7 @@ export function RetroPlanning() {
     const map = new Map<string, Vuln[]>();
     for (const k of timelineKeys) map.set(k, []);
     for (const v of visible) {
-      if (v.status === "DONE") continue;
+      if (v.status === "DONE" || v.status === "ARCHIVE") continue;
       if (!v.dueAt) continue;
       const key = toLocalDateKey(new Date(v.dueAt));
       if (map.has(key)) map.get(key)!.push(v);
@@ -348,7 +348,10 @@ export function RetroPlanning() {
               }
             }
             const content = parts.join("\n");
-            const blob = new Blob([content], { type: "application/pdf" });
+            const pdfBytes = buildSimplePdf(content, "Export planning");
+            const pdfBuffer = new ArrayBuffer(pdfBytes.byteLength);
+            new Uint8Array(pdfBuffer).set(pdfBytes);
+            const blob = new Blob([pdfBuffer], { type: "application/pdf" });
             const url = URL.createObjectURL(blob);
             const a = document.createElement("a");
             a.href = url;
@@ -363,6 +366,91 @@ export function RetroPlanning() {
       ) : null}
     </div>
   );
+}
+
+function pdfEscapeText(value: string): string {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)");
+}
+
+function toPdfDate(d = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `D:${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(
+    d.getMinutes(),
+  )}${pad(d.getSeconds())}Z`;
+}
+
+function buildSimplePdf(content: string, title: string): Uint8Array {
+  const lines = content
+    .split(/\r?\n/)
+    .map((l) => l.trimEnd())
+    .flatMap((l) => (l.length > 110 ? l.match(/.{1,110}/g) ?? [l] : [l]));
+  const pageHeight = 842;
+  const lineHeight = 14;
+  const top = 800;
+  const left = 50;
+  const maxLinesPerPage = 52;
+
+  const pages: string[] = [];
+  for (let i = 0; i < lines.length; i += maxLinesPerPage) {
+    const chunk = lines.slice(i, i + maxLinesPerPage);
+    const contentStream = [
+      "BT",
+      "/F1 11 Tf",
+      `${left} ${top} Td`,
+      ...chunk.map((line, idx) => `${idx === 0 ? "" : `0 -${lineHeight} Td `}(${pdfEscapeText(line)}) Tj`),
+      "ET",
+    ].join("\n");
+    pages.push(contentStream);
+  }
+  if (pages.length === 0) pages.push("BT /F1 11 Tf 50 800 Td (Aucune donnee) Tj ET");
+
+  const objects: string[] = [];
+  const addObj = (body: string) => {
+    objects.push(body);
+    return objects.length;
+  };
+
+  const fontId = addObj("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+  const pageEntries: { pageId: number; contentId: number }[] = pages.map((stream) => {
+    const contentId = addObj(
+      `<< /Length ${new TextEncoder().encode(stream).length} >>\nstream\n${stream}\nendstream`,
+    );
+    const pageId = addObj(
+      `<< /Type /Page /Parent 0 0 R /MediaBox [0 0 595 ${pageHeight}] /Resources << /Font << /F1 ${fontId} 0 R >> >> /Contents ${contentId} 0 R >>`,
+    );
+    return { pageId, contentId };
+  });
+
+  const kids = pageEntries.map((p) => `${p.pageId} 0 R`).join(" ");
+  const pagesId = addObj(`<< /Type /Pages /Kids [${kids}] /Count ${pageEntries.length} >>`);
+  const infoId = addObj(
+    `<< /Title (${pdfEscapeText(title)}) /Producer (Procyon) /CreationDate (${toPdfDate()}) >>`,
+  );
+  const catalogId = addObj(`<< /Type /Catalog /Pages ${pagesId} 0 R >>`);
+
+  // Fix Parent references now that Pages object exists
+  for (const { pageId } of pageEntries) {
+    objects[pageId - 1] = objects[pageId - 1].replace("/Parent 0 0 R", `/Parent ${pagesId} 0 R`);
+  }
+
+  let pdf = "%PDF-1.4\n";
+  const offsets: number[] = [0];
+  for (let i = 0; i < objects.length; i++) {
+    offsets.push(pdf.length);
+    pdf += `${i + 1} 0 obj\n${objects[i]}\nendobj\n`;
+  }
+  const xrefOffset = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n`;
+  pdf += "0000000000 65535 f \n";
+  for (let i = 1; i <= objects.length; i++) {
+    pdf += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
+  }
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root ${catalogId} 0 R /Info ${infoId} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+
+  return new TextEncoder().encode(pdf);
 }
 
 function BucketsBody({
