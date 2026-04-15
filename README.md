@@ -4,7 +4,7 @@
 
 **A lightweight, self-hosted vulnerability tracking workspace.**
 
-Kanban board, retro-planning, and extensible scan imports — without the bloat.
+Modern dashboard widgets, Kanban operations, calendar planning, and extensible imports — without the bloat.
 
 [![Next.js](https://img.shields.io/badge/Next.js-15-black?logo=next.js)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3+-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -19,10 +19,10 @@ Kanban board, retro-planning, and extensible scan imports — without the bloat.
 
 ## Why Procyon?
 
-Security teams juggle spreadsheets, heavy GRC suites, and one-off exports. **Procyon** sits in the middle: a **fast** web UI to triage findings, acknowledge alerts, set due dates, and **replay imports** from familiar tools (PingCastle, CSV, and more via pluggable parsers).
+Security teams juggle spreadsheets, heavy GRC suites, and one-off exports. **Procyon** sits in the middle: a **fast** web UI to triage findings, acknowledge alerts, set due dates, and **replay imports** from familiar tools (PingCastle, CSV, SentinelOne ISPM API, and more via pluggable parsers).
 
 - **Own your data** — PostgreSQL + optional on-disk archive of imported files.
-- **Opinionated UX** — severity on the card edge, drag-and-drop status on the dashboard, planning views when you need the big picture.
+- **Opinionated UX** — severity-first cards, drag-and-drop status, customizable widgets, and practical planning views.
 - **Small surface** — Next.js App Router, a focused REST API, no unnecessary services.
 
 ---
@@ -31,11 +31,12 @@ Security teams juggle spreadsheets, heavy GRC suites, and one-off exports. **Pro
 
 | Area | What you get |
 |------|----------------|
-| **Dashboard** | Three-column board (To do / In progress / Done). Drag cards by the handle to change status. Manual create + inline acknowledge workflow. |
-| **Planning** | Bucketed deadlines, 14-day timeline, Kanban by status, Gantt-style creation → due date. Filters for done items and unacknowledged only. |
-| **Imports** | Upload scan output against a **scan template** (slug + parser). Re-imports with the same `externalRef` update the existing row. |
-| **Reports archive** | Successful imports store a copy under `REPORTS_DIR`; browse and download from the UI. |
-| **Theming** | Light, dark, or system — from the settings menu. |
+| **Monitoring overview** | Widget-based homepage (KPIs, trend chart, status donuts, upcoming deadlines). Show/hide and reorder widgets, with layout persisted in localStorage. |
+| **Kanban operations** | Status columns with drag-and-drop, severity/category filters, sort options, configurable metric cards, and localStorage persistence for view settings. |
+| **Planning** | Efficient monthly calendar + deadlines buckets. Day side panel on click, drag task between days to move due dates, and focused filters. |
+| **Imports** | Unified import modal with preview/confirm workflow. Supports PingCastle XML, generic CSV, and SentinelOne ISPM API with duplicate protection. |
+| **Reports archive** | Successful imports store an archive file under `REPORTS_DIR`; includes uploaded files and raw SentinelOne API JSON payloads. |
+| **Internationalization & theme** | Light/dark/system theme and EN/FR locale (browser auto-detection with manual override in settings). |
 
 ---
 
@@ -47,7 +48,7 @@ Security teams juggle spreadsheets, heavy GRC suites, and one-off exports. **Pro
 | Language | [TypeScript](https://www.typescriptlang.org/) |
 | Styling | [Tailwind CSS v4](https://tailwindcss.com/) |
 | Database | [PostgreSQL](https://www.postgresql.org/) via [Prisma](https://www.prisma.io/) |
-| Drag & drop | [@dnd-kit/core](https://docs.dndkit.com/) |
+| Drag & drop | [@dnd-kit/core](https://docs.dndkit.com/) + native HTML5 DnD where smoother |
 | XML / CSV | [fast-xml-parser](https://github.com/NaturalIntelligence/fast-xml-parser) + custom parsers |
 
 ```mermaid
@@ -104,7 +105,7 @@ npx prisma migrate deploy
 npx prisma db seed
 ```
 
-The seed loads built-in scan templates (e.g. PingCastle XML, generic CSV).
+The seed loads built-in scan templates (PingCastle XML, generic CSV, SentinelOne ISPM API).
 
 ### 4. Run
 
@@ -151,7 +152,6 @@ procyon/
 │   └── lib/
 │       ├── parsers/        # Scan parsers + registry
 │       ├── planning-buckets.ts
-│       ├── gantt.ts
 │       └── db.ts
 ├── docker-compose.yml
 ├── Dockerfile
@@ -168,6 +168,8 @@ Built-in templates (see seed) map a **slug** to a **`parserId`** implemented in 
 |-----------|----------------|
 | `pingcastle_xml` | PingCastle XML exports (flexible risk-rule node detection) |
 | `generic_csv` | CSV with header: `title`, `severity`, optional `description`, `externalRef`. Severities: `INFO`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`. |
+
+> SentinelOne ISPM import is API-driven (no local parser file required in `runParser`).
 
 From the UI you can register **new templates** that reuse an existing `parserId`.
 
@@ -189,21 +191,24 @@ REST-style handlers under `src/app/api/`.
 | `GET`, `POST` | `/api/vulnerabilities` | List / create vulnerabilities |
 | `PATCH`, `DELETE` | `/api/vulnerabilities/[id]` | Update fields (status, `dueAt`, `acknowledgedAt`, …) / delete |
 | `GET`, `POST` | `/api/templates` | List / create scan templates |
+| `POST` | `/api/import/preview` | Preview file import (`multipart/form-data`: `file`, `templateSlug`) |
 | `POST` | `/api/import` | `multipart/form-data`: `file`, `templateSlug` |
+| `POST` | `/api/import/sentinelone-ispm/preview` | Preview SentinelOne ISPM API import (`tenantUrl`, `token`, `siteIds`) |
+| `POST` | `/api/import/sentinelone-ispm` | Confirm SentinelOne ISPM API import |
 | `GET` | `/api/reports` | List import batches + file presence |
 | `GET` | `/api/reports/[id]/file` | Stream archived file (`?download=1` to force download) |
 
-Imports that supply `externalRef` **upsert** by that reference when a row already exists.
+Imports that supply `externalRef` update existing rows when a match is found. Preview endpoints return create/update/skip decisions before confirmation.
 
 ---
 
 ## Data model (high level)
 
-- **`Vulnerability`** — title, description, severity, status, source, optional `externalRef`, `dueAt`, `acknowledgedAt`, JSON `metadata`.
+- **`Vulnerability`** — title, description, severity, status (`TODO` / `IN_PROGRESS` / `DONE` / `ARCHIVE`), source, optional `externalRef`, `dueAt`, `acknowledgedAt`, JSON `metadata`.
 - **`ScanTemplate`** — display name, slug, `parserId`, file hint.
 - **`ImportBatch`** — links uploads to a template; optional `storedPath` under `REPORTS_DIR`.
 
-Acknowledgement (`acknowledgedAt`) is independent of status **Done** — use both for compliance-style workflows.
+Acknowledgement uses the `ARCHIVE` workflow and preserves previous status in metadata so tasks can be unacknowledged cleanly.
 
 ---
 
