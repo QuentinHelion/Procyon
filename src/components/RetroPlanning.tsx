@@ -2,22 +2,18 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { buildGanttModel } from "@/lib/gantt";
 import {
   BUCKET_LABEL,
   BUCKET_ORDER,
   bucketForTask,
-  nextDayKeys,
   toLocalDateKey,
   type PlanningBucketId,
 } from "@/lib/planning-buckets";
 import { PlanningTaskCard, type PlanningVuln } from "@/components/PlanningTaskCard";
 
 type VulnStatus = PlanningVuln["status"];
-
 type Vuln = PlanningVuln & { createdAt: string };
-
-type PlanningView = "buckets" | "period" | "calendar" | "gantt";
+type PlanningView = "buckets" | "calendar";
 
 async function parseJson<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -38,18 +34,9 @@ export function RetroPlanning() {
   const [items, setItems] = useState<Vuln[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [view, setView] = useState<PlanningView>("buckets");
-  const [showDone, setShowDone] = useState(false);
-  const [onlyUnacknowledged, setOnlyUnacknowledged] = useState(false);
-  const [exportModalOpen, setExportModalOpen] = useState(false);
-  const [exportSelection, setExportSelection] = useState<{
-    buckets: boolean;
-    period: boolean;
-    calendar: boolean;
-    gantt: boolean;
-  }>({ buckets: true, period: true, calendar: true, gantt: true });
-  const [periodStart, setPeriodStart] = useState(() => new Date());
-  const [periodDays, setPeriodDays] = useState(14);
+  const [view, setView] = useState<PlanningView>("calendar");
+  const [filterMode, setFilterMode] = useState<"with_done" | "unack_only">("with_done");
+  const [calendarMonthOffset, setCalendarMonthOffset] = useState(0);
 
   const load = useCallback(async () => {
     setError(null);
@@ -68,76 +55,47 @@ export function RetroPlanning() {
     void load();
   }, [load]);
 
-  function shiftPeriod(direction: "back" | "forward") {
-    setPeriodStart((prev) => {
-      const d = new Date(prev);
-      d.setDate(d.getDate() + (direction === "back" ? -periodDays : periodDays));
-      return d;
-    });
-  }
-
   const visible = useMemo(() => {
-    if (!onlyUnacknowledged) return items;
-    return items.filter((v) => v.status !== "DONE" && v.status !== "ARCHIVE" && !v.acknowledgedAt);
-  }, [items, onlyUnacknowledged]);
+    return items.filter((v) => {
+      if (filterMode === "unack_only" && (v.status === "DONE" || v.status === "ARCHIVE" || Boolean(v.acknowledgedAt))) {
+        return false;
+      }
+      return true;
+    });
+  }, [filterMode, items]);
 
   const grouped = useMemo(() => {
     const m = new Map<PlanningBucketId, Vuln[]>();
     for (const id of BUCKET_ORDER) m.set(id, []);
     m.set("done", []);
 
-    const clock = new Date();
+    const now = new Date();
     for (const v of visible) {
-      const b = bucketForTask(v.status, v.dueAt ? new Date(v.dueAt) : null, clock);
-      if (b === "done" && !showDone) continue;
-      m.get(b)?.push(v);
+      const bucket = bucketForTask(v.status, v.dueAt ? new Date(v.dueAt) : null, now);
+      m.get(bucket)?.push(v);
     }
 
-    const sortOpen = (a: Vuln, b: Vuln) => {
-      const ad = a.dueAt ? new Date(a.dueAt).getTime() : Infinity;
-      const bd = b.dueAt ? new Date(b.dueAt).getTime() : Infinity;
-      if (ad !== bd) return ad - bd;
+    const sortByDue = (a: Vuln, b: Vuln) => {
+      const aDue = a.dueAt ? new Date(a.dueAt).getTime() : Infinity;
+      const bDue = b.dueAt ? new Date(b.dueAt).getTime() : Infinity;
+      if (aDue !== bDue) return aDue - bDue;
       return a.title.localeCompare(b.title, "fr");
     };
-    for (const id of BUCKET_ORDER) {
-      m.get(id)?.sort(sortOpen);
-    }
+
+    for (const id of BUCKET_ORDER) m.get(id)?.sort(sortByDue);
     m.get("done")?.sort((a, b) => b.title.localeCompare(a.title, "fr"));
-
     return m;
-  }, [visible, showDone]);
+  }, [visible]);
 
-  const timelineKeys = useMemo(() => nextDayKeys(periodStart, periodDays), [periodStart, periodDays]);
-  const timelineMap = useMemo(() => {
-    const map = new Map<string, Vuln[]>();
-    for (const k of timelineKeys) map.set(k, []);
-    for (const v of visible) {
-      if (v.status === "DONE" || v.status === "ARCHIVE") continue;
-      if (!v.dueAt) continue;
-      const key = toLocalDateKey(new Date(v.dueAt));
-      if (map.has(key)) map.get(key)!.push(v);
-    }
-    for (const list of map.values()) {
-      list.sort((a, b) => a.title.localeCompare(b.title, "fr"));
-    }
-    return map;
-  }, [visible, timelineKeys]);
-
-  const ganttModel = useMemo(
-    () =>
-      buildGanttModel(visible, {
-        showDone,
-        minBarDays: 3,
-        tailPaddingDays: 56,
-      }),
-    [visible, showDone],
-  );
+  const calendarBaseDate = useMemo(() => {
+    const d = new Date();
+    d.setDate(1);
+    d.setMonth(d.getMonth() + calendarMonthOffset);
+    return d;
+  }, [calendarMonthOffset]);
 
   async function patchDue(id: string, dateStr: string) {
-    const payload =
-      dateStr === ""
-        ? { dueAt: null as null }
-        : { dueAt: fromDateInputToIso(dateStr) ?? null };
+    const payload = dateStr === "" ? { dueAt: null as null } : { dueAt: fromDateInputToIso(dateStr) ?? null };
     const res = await fetch(`/api/vulnerabilities/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -168,47 +126,20 @@ export function RetroPlanning() {
   }
 
   const viewOptions: { id: PlanningView; label: string; hint: string }[] = [
-    { id: "buckets", label: "Échéances (périodes)", hint: "Retard, cette semaine, sans date…" },
-    { id: "period", label: "Période", hint: "Plage glissante (7/14/30 jours)" },
-    { id: "calendar", label: "Calendrier", hint: "Vue mensuelle classique" },
-    { id: "gantt", label: "Gantt", hint: "Création → échéance" },
+    { id: "calendar", label: "Calendrier", hint: "Navigation mensuelle avec vue dense et efficace" },
+    { id: "buckets", label: "Échéances", hint: "Retard, cette semaine, sans date, etc." },
   ];
 
   return (
     <div className="mx-auto max-w-[1480px] px-5 py-8 lg:px-10 lg:py-10">
       <div className="mb-10 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--accent)]">
-            Pilotage temporel
-          </p>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight text-[var(--text)] sm:text-3xl">
-            Rétro-planning
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--muted)]">
-            Choisissez une vue ci-dessous pour lire les échéances et mettre à jour les tâches. Pour changer le{" "}
-            <strong>statut</strong> par glisser-déposer, utilisez le{" "}
-            <Link href="/" className="text-[var(--accent)] underline underline-offset-2">
-              tableau de bord
-            </Link>
-            .
-          </p>
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--accent)]">Pilotage temporel</p>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight text-[var(--text)] sm:text-3xl">Planning</h1>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void load()}
-            className="ui-btn-secondary px-4 py-2.5 text-xs font-semibold"
-          >
-            Actualiser
-          </button>
-          <button
-            type="button"
-            onClick={() => setExportModalOpen(true)}
-            className="ui-btn-secondary px-4 py-2.5 text-xs font-semibold"
-          >
-            Exporter en PDF
-          </button>
-        </div>
+        <button type="button" onClick={() => void load()} className="ui-btn-secondary px-4 py-2.5 text-xs font-semibold">
+          Actualiser
+        </button>
       </div>
 
       <div className="ui-card mb-6 flex flex-col gap-4 p-4 lg:p-5">
@@ -222,35 +153,32 @@ export function RetroPlanning() {
               aria-label="Choisir la vue du planning"
             >
               {viewOptions.map((o) => (
-                <option key={o.id} value={o.id} title={o.hint}>
+                <option key={o.id} value={o.id}>
                   {o.label}
                 </option>
               ))}
             </select>
           </label>
-          <p className="text-[11px] leading-snug text-[var(--muted)] sm:max-w-xs sm:pb-1">
-            {viewOptions.find((o) => o.id === view)?.hint}
-          </p>
         </div>
         <details className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-muted)]/60 px-3 py-2 text-xs">
-          <summary className="cursor-pointer select-none font-semibold text-[var(--text)]">
-            Filtres
-          </summary>
+          <summary className="cursor-pointer select-none font-semibold text-[var(--text)]">Filtres</summary>
           <div className="mt-3 flex flex-col gap-3 text-[var(--muted)] sm:flex-row sm:flex-wrap sm:gap-6">
             <label className="flex cursor-pointer items-center gap-2">
               <input
-                type="checkbox"
-                checked={showDone}
-                onChange={(e) => setShowDone(e.target.checked)}
+                type="radio"
+                name="planning-filter-mode"
+                checked={filterMode === "with_done"}
+                onChange={() => setFilterMode("with_done")}
                 className="rounded border-[var(--border)]"
               />
-              Afficher les terminées
+              Afficher les terminées / acquittées
             </label>
             <label className="flex cursor-pointer items-center gap-2">
               <input
-                type="checkbox"
-                checked={onlyUnacknowledged}
-                onChange={(e) => setOnlyUnacknowledged(e.target.checked)}
+                type="radio"
+                name="planning-filter-mode"
+                checked={filterMode === "unack_only"}
+                onChange={() => setFilterMode("unack_only")}
                 className="rounded border-[var(--border)]"
               />
               Non acquittées seulement
@@ -270,220 +198,56 @@ export function RetroPlanning() {
       ) : items.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">
           Aucune vulnérabilité. Créez-en depuis le{" "}
-          <Link href="/" className="text-[var(--accent)] underline">
-            tableau
+          <Link href="/kanban" className="text-[var(--accent)] underline">
+            Kanban
           </Link>
           .
         </p>
       ) : visible.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">Aucun élément ne correspond au filtre actuel.</p>
-      ) : view === "buckets" ? (
-        <BucketsBody
-          grouped={grouped}
-          showDone={showDone}
+      ) : view === "calendar" ? (
+        <CalendarBody
+          items={visible}
+          baseDate={calendarBaseDate}
+          onPrevMonth={() => setCalendarMonthOffset((v) => v - 1)}
+          onNextMonth={() => setCalendarMonthOffset((v) => v + 1)}
+          onToday={() => setCalendarMonthOffset(0)}
           onPatchDue={patchDue}
           onPatchStatus={patchStatus}
           onPatchAck={patchAck}
         />
-      ) : view === "period" ? (
-        <PeriodBody
-          timelineKeys={timelineKeys}
-          timelineMap={timelineMap}
-          periodStart={periodStart}
-          periodDays={periodDays}
-          setPeriodDays={setPeriodDays}
-          shiftPeriod={shiftPeriod}
-        />
-      ) : view === "calendar" ? (
-        <CalendarBody items={visible} />
       ) : (
-        <GanttBody ganttModel={ganttModel} />
+        <BucketsBody grouped={grouped} onPatchDue={patchDue} onPatchStatus={patchStatus} onPatchAck={patchAck} />
       )}
-
-      {exportModalOpen ? (
-        <ExportModal
-          selection={exportSelection}
-          onChangeSelection={setExportSelection}
-          onCancel={() => setExportModalOpen(false)}
-          onConfirm={() => {
-            const parts: string[] = [];
-            if (exportSelection.buckets) {
-              parts.push("# Échéances (périodes)");
-              for (const id of BUCKET_ORDER) {
-                const list = grouped.get(id) ?? [];
-                if (!list.length) continue;
-                parts.push(`\n## ${BUCKET_LABEL[id]} (${list.length})`);
-                for (const v of list) {
-                  parts.push(`- ${v.title}${v.dueAt ? " — " + new Date(v.dueAt).toLocaleDateString("fr-FR") : ""}`);
-                }
-              }
-            }
-            if (exportSelection.period) {
-              parts.push("\n# Période");
-              for (const key of timelineKeys) {
-                const list = timelineMap.get(key) ?? [];
-                if (!list.length) continue;
-                parts.push(`\n## ${key}`);
-                for (const v of list) {
-                  parts.push(`- ${v.title}`);
-                }
-              }
-            }
-            if (exportSelection.calendar) {
-              parts.push("\n# Calendrier (mois en cours)");
-              const byDay = groupByDayForCalendar(visible);
-              for (const [day, list] of byDay) {
-                parts.push(`\n## ${day}`);
-                for (const v of list) parts.push(`- ${v.title}`);
-              }
-            }
-            if (exportSelection.gantt && ganttModel) {
-              parts.push("\n# Gantt");
-              for (const b of ganttModel.bars) {
-                parts.push(
-                  `- ${b.title} : ${new Date(b.startMs).toLocaleDateString(
-                    "fr-FR",
-                  )} → ${new Date(b.endMs).toLocaleDateString("fr-FR")}`,
-                );
-              }
-            }
-            const content = parts.join("\n");
-            const pdfBytes = buildSimplePdf(content, "Export planning");
-            const pdfBuffer = new ArrayBuffer(pdfBytes.byteLength);
-            new Uint8Array(pdfBuffer).set(pdfBytes);
-            const blob = new Blob([pdfBuffer], { type: "application/pdf" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = "planning.pdf";
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            setExportModalOpen(false);
-          }}
-        />
-      ) : null}
     </div>
   );
 }
 
-function pdfEscapeText(value: string): string {
-  return value
-    .replace(/\\/g, "\\\\")
-    .replace(/\(/g, "\\(")
-    .replace(/\)/g, "\\)");
-}
-
-function toPdfDate(d = new Date()): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `D:${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(
-    d.getMinutes(),
-  )}${pad(d.getSeconds())}Z`;
-}
-
-function buildSimplePdf(content: string, title: string): Uint8Array {
-  const lines = content
-    .split(/\r?\n/)
-    .map((l) => l.trimEnd())
-    .flatMap((l) => (l.length > 110 ? l.match(/.{1,110}/g) ?? [l] : [l]));
-  const pageHeight = 842;
-  const lineHeight = 14;
-  const top = 800;
-  const left = 50;
-  const maxLinesPerPage = 52;
-
-  const pages: string[] = [];
-  for (let i = 0; i < lines.length; i += maxLinesPerPage) {
-    const chunk = lines.slice(i, i + maxLinesPerPage);
-    const contentStream = [
-      "BT",
-      "/F1 11 Tf",
-      `${left} ${top} Td`,
-      ...chunk.map((line, idx) => `${idx === 0 ? "" : `0 -${lineHeight} Td `}(${pdfEscapeText(line)}) Tj`),
-      "ET",
-    ].join("\n");
-    pages.push(contentStream);
-  }
-  if (pages.length === 0) pages.push("BT /F1 11 Tf 50 800 Td (Aucune donnee) Tj ET");
-
-  const objects: string[] = [];
-  const addObj = (body: string) => {
-    objects.push(body);
-    return objects.length;
-  };
-
-  const fontId = addObj("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
-  const pageEntries: { pageId: number; contentId: number }[] = pages.map((stream) => {
-    const contentId = addObj(
-      `<< /Length ${new TextEncoder().encode(stream).length} >>\nstream\n${stream}\nendstream`,
-    );
-    const pageId = addObj(
-      `<< /Type /Page /Parent 0 0 R /MediaBox [0 0 595 ${pageHeight}] /Resources << /Font << /F1 ${fontId} 0 R >> >> /Contents ${contentId} 0 R >>`,
-    );
-    return { pageId, contentId };
-  });
-
-  const kids = pageEntries.map((p) => `${p.pageId} 0 R`).join(" ");
-  const pagesId = addObj(`<< /Type /Pages /Kids [${kids}] /Count ${pageEntries.length} >>`);
-  const infoId = addObj(
-    `<< /Title (${pdfEscapeText(title)}) /Producer (Procyon) /CreationDate (${toPdfDate()}) >>`,
-  );
-  const catalogId = addObj(`<< /Type /Catalog /Pages ${pagesId} 0 R >>`);
-
-  // Fix Parent references now that Pages object exists
-  for (const { pageId } of pageEntries) {
-    objects[pageId - 1] = objects[pageId - 1].replace("/Parent 0 0 R", `/Parent ${pagesId} 0 R`);
-  }
-
-  let pdf = "%PDF-1.4\n";
-  const offsets: number[] = [0];
-  for (let i = 0; i < objects.length; i++) {
-    offsets.push(pdf.length);
-    pdf += `${i + 1} 0 obj\n${objects[i]}\nendobj\n`;
-  }
-  const xrefOffset = pdf.length;
-  pdf += `xref\n0 ${objects.length + 1}\n`;
-  pdf += "0000000000 65535 f \n";
-  for (let i = 1; i <= objects.length; i++) {
-    pdf += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
-  }
-  pdf += `trailer\n<< /Size ${objects.length + 1} /Root ${catalogId} 0 R /Info ${infoId} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
-
-  return new TextEncoder().encode(pdf);
-}
-
 function BucketsBody({
   grouped,
-  showDone,
   onPatchDue,
   onPatchStatus,
   onPatchAck,
 }: {
   grouped: Map<PlanningBucketId, Vuln[]>;
-  showDone: boolean;
   onPatchDue: (id: string, dateStr: string) => void;
   onPatchStatus: (id: string, s: VulnStatus) => void;
   onPatchAck: (id: string, ack: boolean) => void;
 }) {
-  const hasOpen = BUCKET_ORDER.some((bid) => (grouped.get(bid) ?? []).length > 0);
-  const doneLen = grouped.get("done")?.length ?? 0;
-  if (!hasOpen && !(showDone && doneLen > 0)) {
-    return (
-      <p className="text-sm text-[var(--muted)]">
-        Toutes les tâches ouvertes sont terminées. Cochez « Afficher les terminées » ou élargissez le filtre.
-      </p>
-    );
+  const hasContent = [...grouped.values()].some((list) => list.length > 0);
+  if (!hasContent) {
+    return <p className="text-sm text-[var(--muted)]">Aucun élément à afficher pour les filtres en cours.</p>;
   }
+
   return (
     <div className="space-y-8">
-      {BUCKET_ORDER.map((bid) => {
-        const list = grouped.get(bid) ?? [];
-        if (list.length === 0) return null;
+      {[...BUCKET_ORDER, "done" as const].map((bucketId) => {
+        const list = grouped.get(bucketId) ?? [];
+        if (!list.length) return null;
         return (
-          <section key={bid}>
+          <section key={bucketId}>
             <h2 className="mb-3 text-sm font-semibold text-[var(--text)]">
-              {BUCKET_LABEL[bid]}
+              {BUCKET_LABEL[bucketId]}
               <span className="ml-2 font-normal text-[var(--muted)]">({list.length})</span>
             </h2>
             <div className="space-y-2">
@@ -500,128 +264,6 @@ function BucketsBody({
           </section>
         );
       })}
-      {showDone && doneLen > 0 ? (
-        <section>
-          <h2 className="mb-3 text-sm font-semibold text-[var(--text)]">
-            {BUCKET_LABEL.done}
-            <span className="ml-2 font-normal text-[var(--muted)]">({doneLen})</span>
-          </h2>
-          <div className="space-y-2 opacity-90">
-            {(grouped.get("done") ?? []).map((v) => (
-              <PlanningTaskCard
-                key={v.id}
-                v={v}
-                onPatchDue={onPatchDue}
-                onPatchStatus={onPatchStatus}
-                onPatchAck={onPatchAck}
-              />
-            ))}
-          </div>
-        </section>
-      ) : null}
-    </div>
-  );
-}
-
-function PeriodBody({
-  timelineKeys,
-  timelineMap,
-  periodStart,
-  periodDays,
-  setPeriodDays,
-  shiftPeriod,
-}: {
-  timelineKeys: string[];
-  timelineMap: Map<string, Vuln[]>;
-  periodStart: Date;
-  periodDays: number;
-  setPeriodDays: (n: number) => void;
-  shiftPeriod: (dir: "back" | "forward") => void;
-}) {
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--muted)]">
-        <span className="font-semibold text-[var(--text)]">Période</span>
-        <span>
-          du{" "}
-          {periodStart.toLocaleDateString("fr-FR")} au{" "}
-          {new Date(periodStart.getTime() + (periodDays - 1) * 24 * 60 * 60 * 1000).toLocaleDateString("fr-FR")}
-        </span>
-        <div className="flex flex-wrap items-center gap-2">
-          <span>Durée :</span>
-          {[7, 14, 30].map((d) => (
-            <button
-              key={d}
-              type="button"
-              onClick={() => setPeriodDays(d)}
-              className={`rounded-full px-2 py-1 text-[11px] ${
-                periodDays === d
-                  ? "bg-[var(--accent)] text-white"
-                  : "border border-[var(--border)] bg-[var(--surface-muted)] text-[var(--muted)]"
-              }`}
-            >
-              {d} j
-            </button>
-          ))}
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => shiftPeriod("back")}
-            className="rounded-full border border-[var(--border)] bg-[var(--surface-muted)] px-2 py-1 text-[11px]"
-          >
-            ◀ Précédent
-          </button>
-          <button
-            type="button"
-            onClick={() => shiftPeriod("forward")}
-            className="rounded-full border border-[var(--border)] bg-[var(--surface-muted)] px-2 py-1 text-[11px]"
-          >
-            Suivant ▶
-          </button>
-        </div>
-      </div>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
-        {timelineKeys.map((key) => {
-          const list = timelineMap.get(key) ?? [];
-          const [y, mo, d] = key.split("-").map(Number);
-          const label = new Date(y, mo - 1, d).toLocaleDateString("fr-FR", {
-            weekday: "short",
-            day: "numeric",
-            month: "short",
-          });
-          const isToday = key === toLocalDateKey(new Date());
-          return (
-            <div
-              key={key}
-              className={`flex min-h-[120px] flex-col rounded-[var(--radius-lg)] border p-2.5 ${
-                isToday
-                  ? "border-[var(--accent)] bg-[var(--accent-subtle)] shadow-sm"
-                  : "border-[var(--border)] bg-[var(--surface-muted)]"
-              }`}
-            >
-              <p className="text-center text-[10px] font-semibold capitalize text-[var(--text)]">
-                {label}
-              </p>
-              <ul className="mt-2 flex flex-1 flex-col gap-1.5">
-                {list.map((v) => (
-                  <li
-                    key={v.id}
-                    className={`rounded border px-1.5 py-1 text-[10px] leading-tight ${
-                      v.status !== "DONE" && !v.acknowledgedAt
-                        ? "border-amber-500/50 bg-amber-500/10"
-                        : "border-[var(--border)] bg-[var(--surface)]"
-                    } text-[var(--text)]`}
-                    title={v.title}
-                  >
-                    <span className="line-clamp-3">{v.title}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          );
-        })}
-      </div>
     </div>
   );
 }
@@ -629,216 +271,194 @@ function PeriodBody({
 function groupByDayForCalendar(items: Vuln[]): Map<string, Vuln[]> {
   const map = new Map<string, Vuln[]>();
   for (const v of items) {
-    const d = v.dueAt ? new Date(v.dueAt) : null;
-    if (!d) continue;
-    const key = toLocalDateKey(d);
+    if (!v.dueAt) continue;
+    const key = toLocalDateKey(new Date(v.dueAt));
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(v);
+  }
+  for (const list of map.values()) {
+    list.sort((a, b) => a.title.localeCompare(b.title, "fr"));
   }
   return map;
 }
 
-function CalendarBody({ items }: { items: Vuln[] }) {
+function CalendarBody({
+  items,
+  baseDate,
+  onPrevMonth,
+  onNextMonth,
+  onToday,
+  onPatchDue,
+  onPatchStatus,
+  onPatchAck,
+}: {
+  items: Vuln[];
+  baseDate: Date;
+  onPrevMonth: () => void;
+  onNextMonth: () => void;
+  onToday: () => void;
+  onPatchDue: (id: string, dateStr: string) => void;
+  onPatchStatus: (id: string, s: VulnStatus) => void;
+  onPatchAck: (id: string, ack: boolean) => void;
+}) {
   const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth();
+  const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
+  const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
+  const year = baseDate.getFullYear();
+  const month = baseDate.getMonth();
   const first = new Date(year, month, 1);
-  const firstDay = first.getDay() === 0 ? 6 : first.getDay() - 1; // lundi=0
+  const firstDay = first.getDay() === 0 ? 6 : first.getDay() - 1;
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const cells: (number | null)[] = [];
   for (let i = 0; i < firstDay; i++) cells.push(null);
-  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  for (let day = 1; day <= daysInMonth; day++) cells.push(day);
   while (cells.length % 7 !== 0) cells.push(null);
 
   const byDay = groupByDayForCalendar(items);
+  const taskById = useMemo(() => new Map(items.map((v) => [v.id, v])), [items]);
+  const selectedTasks = selectedDayKey ? byDay.get(selectedDayKey) ?? [] : [];
 
-  return (
-    <div className="space-y-3">
-      <p className="text-xs text-[var(--muted)]">
-        Calendrier du mois en cours. Chaque case correspond à un jour avec ses vulnérabilités planifiées.
-      </p>
-      <div className="ui-card p-3">
-        <div className="mb-2 grid grid-cols-7 text-center text-[10px] font-semibold text-[var(--muted)]">
-          {["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"].map((d) => (
-            <span key={d}>{d}</span>
-          ))}
-        </div>
-        <div className="grid grid-cols-7 gap-1">
-          {cells.map((d, idx) => {
-            if (d === null) {
-              return <div key={idx} className="h-20 rounded-[var(--radius-md)] bg-transparent" />;
-            }
-            const date = new Date(year, month, d);
-            const key = toLocalDateKey(date);
-            const list = byDay.get(key) ?? [];
-            const isToday = toLocalDateKey(now) === key;
-            return (
-              <div
-                key={idx}
-                className={`flex h-24 flex-col rounded-[var(--radius-md)] border p-1.5 ${
-                  isToday
-                    ? "border-[var(--accent)] bg-[var(--accent-subtle)]"
-                    : "border-[var(--border)] bg-[var(--surface-muted)]"
-                }`}
-              >
-                <div className="flex items-center justify-between text-[10px] font-semibold text-[var(--text)]">
-                  <span>{d}</span>
-                  {list.length ? (
-                    <span className="rounded-full bg-[var(--column)] px-1 text-[9px] tabular-nums">
-                      {list.length}
-                    </span>
-                  ) : null}
-                </div>
-                <ul className="mt-1 flex-1 space-y-0.5 overflow-hidden">
-                  {list.slice(0, 3).map((v) => (
-                    <li
-                      key={v.id}
-                      className="truncate rounded border border-[var(--border)] bg-[var(--surface)] px-1 py-0.5 text-[9px] leading-tight text-[var(--text)]"
-                      title={v.title}
-                    >
-                      {v.title}
-                    </li>
-                  ))}
-                  {list.length > 3 ? (
-                    <li className="text-[9px] text-[var(--muted)]">+{list.length - 3} autres…</li>
-                  ) : null}
-                </ul>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
+  useEffect(() => {
+    if (!selectedDayKey) return;
+    if (!byDay.has(selectedDayKey)) setSelectedDayKey(null);
+  }, [byDay, selectedDayKey]);
 
-function ExportModal({
-  selection,
-  onChangeSelection,
-  onCancel,
-  onConfirm,
-}: {
-  selection: { buckets: boolean; period: boolean; calendar: boolean; gantt: boolean };
-  onChangeSelection: (s: { buckets: boolean; period: boolean; calendar: boolean; gantt: boolean }) => void;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/45 p-4 backdrop-blur-[2px] sm:items-center">
-      <div className="ui-card w-full max-w-md p-5 shadow-xl">
-        <h2 className="text-sm font-bold text-[var(--text)]">Exporter les vues en PDF</h2>
-        <p className="mt-1 text-xs text-[var(--muted)]">
-          Choisissez les vues à inclure. Un fichier PDF sera généré à partir d’un résumé texte des tâches.
-        </p>
-        <div className="mt-3 space-y-2 text-xs text-[var(--muted)]">
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={selection.buckets}
-              onChange={(e) => onChangeSelection({ ...selection, buckets: e.target.checked })}
-            />
-            Échéances (périodes)
-          </label>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={selection.period}
-              onChange={(e) => onChangeSelection({ ...selection, period: e.target.checked })}
-            />
-            Période
-          </label>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={selection.calendar}
-              onChange={(e) => onChangeSelection({ ...selection, calendar: e.target.checked })}
-            />
-            Calendrier
-          </label>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={selection.gantt}
-              onChange={(e) => onChangeSelection({ ...selection, gantt: e.target.checked })}
-            />
-            Gantt
-          </label>
-        </div>
-        <div className="mt-4 flex justify-end gap-2">
-          <button type="button" onClick={onCancel} className="ui-btn-secondary px-4 py-2 text-xs">
-            Annuler
-          </button>
-          <button type="button" onClick={onConfirm} className="ui-btn-primary px-4 py-2 text-xs">
-            Exporter
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function GanttBody({ ganttModel }: { ganttModel: ReturnType<typeof buildGanttModel> }) {
-  if (!ganttModel) {
-    return (
-      <p className="text-sm text-[var(--muted)]">
-        Aucune tâche à afficher (activez « Afficher les terminées » si tout est clos).
-      </p>
-    );
+  function moveTaskToDay(taskId: string, dayKey: string) {
+    if (!taskId) return;
+    const task = taskById.get(taskId);
+    if (!task) return;
+    const currentDayKey = task.dueAt ? toLocalDateKey(new Date(task.dueAt)) : null;
+    if (currentDayKey === dayKey) return;
+    void onPatchDue(taskId, dayKey);
+    setSelectedDayKey(dayKey);
   }
 
-  const { minMs, maxMs, spanMs, todayPct, bars, weekStarts } = ganttModel;
-
   return (
     <div className="space-y-3">
-      <p className="text-xs text-[var(--muted)]">
-        Chaque barre va de la <strong>date de création</strong> à l’<strong>échéance</strong> (ou +3 jours si
-        pas d’échéance). Ligne verticale : aujourd’hui.
-      </p>
-      <div className="ui-card overflow-x-auto">
-        <div className="min-w-[640px] p-3">
-          <div className="relative mb-2 h-8 border-b border-[var(--border)]">
-            {weekStarts.map((w) => {
-              const left = ((w.ms - minMs) / spanMs) * 100;
-              if (left < 0 || left > 100) return null;
+      <div className="ui-card flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={onPrevMonth} className="ui-btn-secondary px-2.5 py-1 text-xs">
+            ◀
+          </button>
+          <button type="button" onClick={onNextMonth} className="ui-btn-secondary px-2.5 py-1 text-xs">
+            ▶
+          </button>
+          <button type="button" onClick={onToday} className="ui-btn-secondary px-2.5 py-1 text-xs">
+            Aujourd’hui
+          </button>
+        </div>
+        <p className="text-sm font-semibold text-[var(--text)]">
+          {baseDate.toLocaleDateString("fr-FR", { month: "long", year: "numeric" })}
+        </p>
+      </div>
+
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="ui-card p-3">
+          <div className="mb-2 grid grid-cols-7 text-center text-[10px] font-semibold text-[var(--muted)]">
+            {["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"].map((d) => (
+              <span key={d}>{d}</span>
+            ))}
+          </div>
+          <div className="grid grid-cols-7 gap-1">
+            {cells.map((day, idx) => {
+              if (day === null) return <div key={idx} className="h-24 rounded-[var(--radius-md)] bg-transparent" />;
+              const date = new Date(year, month, day);
+              const key = toLocalDateKey(date);
+              const list = byDay.get(key) ?? [];
+              const isToday = key === toLocalDateKey(now);
+              const isSelected = key === selectedDayKey;
               return (
-                <span
-                  key={w.ms}
-                  className="absolute top-0 text-[10px] text-[var(--muted)]"
-                  style={{ left: `${left}%`, transform: "translateX(-0%)" }}
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => setSelectedDayKey(key)}
+                  onDragOver={(e) => {
+                    if (!draggedTaskId) return;
+                    e.preventDefault();
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const taskId = e.dataTransfer.getData("text/task-id") || draggedTaskId;
+                    if (taskId) moveTaskToDay(taskId, key);
+                    setDraggedTaskId(null);
+                  }}
+                  className={`flex h-28 flex-col rounded-[var(--radius-md)] border p-1.5 text-left transition ${
+                    isSelected
+                      ? "ring-2 ring-[var(--accent)]/35"
+                      : ""
+                  } ${
+                    isToday
+                      ? "border-[var(--accent)] bg-[var(--accent-subtle)]"
+                      : "border-[var(--border)] bg-[var(--surface-muted)]"
+                  }`}
                 >
-                  {w.label}
-                </span>
+                  <div className="flex items-center justify-between text-[10px] font-semibold text-[var(--text)]">
+                    <span>{day}</span>
+                    {list.length ? (
+                      <span className="rounded-full bg-[var(--column)] px-1 text-[9px] tabular-nums">{list.length}</span>
+                    ) : null}
+                  </div>
+                  <ul className="mt-1 flex-1 space-y-0.5 overflow-hidden">
+                    {list.slice(0, 3).map((v) => (
+                      <li
+                        key={v.id}
+                        draggable
+                        onDragStart={(e) => {
+                          e.stopPropagation();
+                          e.dataTransfer.effectAllowed = "move";
+                          e.dataTransfer.setData("text/task-id", v.id);
+                          setDraggedTaskId(v.id);
+                        }}
+                        onDragEnd={() => setDraggedTaskId(null)}
+                        className="truncate rounded border border-[var(--border)] bg-[var(--surface)] px-1 py-0.5 text-[9px] leading-tight text-[var(--text)]"
+                        title="Glisser pour déplacer l’échéance"
+                      >
+                        {v.title}
+                      </li>
+                    ))}
+                    {list.length > 3 ? <li className="text-[9px] text-[var(--muted)]">+{list.length - 3} autres…</li> : null}
+                  </ul>
+                </button>
               );
             })}
           </div>
-          <div className="relative">
-            <div
-              className="pointer-events-none absolute bottom-0 top-0 z-10 w-px bg-[var(--accent)]"
-              style={{ left: `${todayPct}%` }}
-              title="Aujourd’hui"
-            />
-            <ul className="space-y-2">
-              {bars.map((b) => (
-                <li key={b.id} className="flex items-center gap-2 text-xs">
-                  <span className="w-[min(28%,180px)] shrink-0 truncate text-[var(--text)]" title={b.title}>
-                    {b.title}
-                  </span>
-                  <div className="relative h-7 min-w-0 flex-1 rounded bg-[var(--column)]">
-                    <div
-                      className="absolute top-1 h-5 rounded-[6px] bg-[var(--accent)] opacity-90"
-                      style={{ left: `${b.leftPct}%`, width: `${b.widthPct}%` }}
-                      title={`${new Date(b.startMs).toLocaleDateString("fr-FR")} → ${new Date(b.endMs).toLocaleDateString("fr-FR")}`}
-                    />
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
-          <p className="mt-3 text-[10px] text-[var(--muted)]">
-            Période affichée : {new Date(minMs).toLocaleDateString("fr-FR")} —{" "}
-            {new Date(maxMs).toLocaleDateString("fr-FR")}
-          </p>
         </div>
+
+        <aside className="ui-card p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-[var(--text)]">
+              {selectedDayKey
+                ? `Échéances du ${new Date(`${selectedDayKey}T12:00:00`).toLocaleDateString("fr-FR")}`
+                : "Détail du jour"}
+            </h3>
+            {selectedDayKey ? (
+              <button
+                type="button"
+                onClick={() => setSelectedDayKey(null)}
+                className="ui-btn-secondary px-2 py-1 text-[10px]"
+              >
+                Fermer
+              </button>
+            ) : null}
+          </div>
+          {!selectedDayKey ? (
+            <p className="text-xs text-[var(--muted)]">Sélectionnez une date.</p>
+          ) : selectedTasks.length === 0 ? (
+            <p className="text-xs text-[var(--muted)]">Aucune tâche sur cette date.</p>
+          ) : (
+            <div className="space-y-2">
+              {selectedTasks.map((v) => (
+                <PlanningTaskCard
+                  key={v.id}
+                  v={v}
+                  onPatchDue={onPatchDue}
+                  onPatchStatus={onPatchStatus}
+                  onPatchAck={onPatchAck}
+                />
+              ))}
+            </div>
+          )}
+        </aside>
       </div>
     </div>
   );

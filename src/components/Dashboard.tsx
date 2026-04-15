@@ -52,6 +52,18 @@ const COLUMNS: { status: VulnStatus; label: string; hint: string }[] = [
 ];
 
 const SEVERITY_ORDER: Severity[] = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"];
+const KANBAN_VISIBLE_COLUMNS_KEY = "procyon-kanban-visible-columns";
+const KANBAN_COLUMN_FILTERS_KEY = "procyon-kanban-column-filters";
+const KANBAN_VISIBLE_METRICS_KEY = "procyon-kanban-visible-metrics";
+type MetricCardId = "total" | "open" | "inProgress" | "criticalOpen" | "acknowledged";
+const SENTINELONE_OPTION = "__sentinelone_ispm__";
+type ImportPreviewAction = "create" | "update" | "skip";
+type ImportPreviewItem = {
+  title: string;
+  severity: Severity;
+  externalRef: string | null;
+  action: ImportPreviewAction;
+};
 
 const severityStyle: Record<Severity, string> = {
   CRITICAL: "bg-red-600/15 text-red-700 dark:text-red-300",
@@ -347,6 +359,19 @@ export function Dashboard() {
   const [importSlug, setImportSlug] = useState("");
   const [importBusy, setImportBusy] = useState(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [s1TenantUrl, setS1TenantUrl] = useState("");
+  const [s1Token, setS1Token] = useState("");
+  const [s1SiteIds, setS1SiteIds] = useState("");
+  const [s1Busy, setS1Busy] = useState(false);
+  const [selectedImportFile, setSelectedImportFile] = useState<File | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [importPreviewKind, setImportPreviewKind] = useState<"file" | "sentinelone" | null>(null);
+  const [importPreviewItems, setImportPreviewItems] = useState<ImportPreviewItem[]>([]);
+  const [importPreviewTotal, setImportPreviewTotal] = useState(0);
+  const [importPreviewCreateCount, setImportPreviewCreateCount] = useState(0);
+  const [importPreviewSecondaryCount, setImportPreviewSecondaryCount] = useState(0);
+  const isSentineloneImport = importSlug === SENTINELONE_OPTION;
 
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
@@ -360,7 +385,7 @@ export function Dashboard() {
       ]);
       setVulns(v);
       setTemplates(t);
-      setImportSlug((prev) => prev || (t[0]?.slug ?? ""));
+      setImportSlug((prev) => prev || (t[0]?.slug ?? SENTINELONE_OPTION));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erreur de chargement");
     } finally {
@@ -409,6 +434,7 @@ export function Dashboard() {
     ARCHIVE: false,
   });
   const [showColumnSettings, setShowColumnSettings] = useState(false);
+  const [showMetricsSettings, setShowMetricsSettings] = useState(false);
   const [columnSeverityFilters, setColumnSeverityFilters] = useState<
     Record<VulnStatus, Record<Severity, boolean>>
   >({
@@ -417,11 +443,93 @@ export function Dashboard() {
     DONE: { CRITICAL: true, HIGH: true, MEDIUM: true, LOW: true, INFO: true },
     ARCHIVE: { CRITICAL: true, HIGH: true, MEDIUM: true, LOW: true, INFO: true },
   });
+  const [visibleMetrics, setVisibleMetrics] = useState<Record<MetricCardId, boolean>>({
+    total: true,
+    open: true,
+    inProgress: true,
+    criticalOpen: true,
+    acknowledged: true,
+  });
 
-  const acknowledgedCount = useMemo(
-    () => vulns.filter((v) => !!v.acknowledgedAt).length,
-    [vulns],
-  );
+  useEffect(() => {
+    try {
+      const rawColumns = localStorage.getItem(KANBAN_VISIBLE_COLUMNS_KEY);
+      if (rawColumns) {
+        const parsed = JSON.parse(rawColumns) as Partial<Record<VulnStatus, boolean>>;
+        const next: Record<VulnStatus, boolean> = {
+          TODO: parsed.TODO ?? true,
+          IN_PROGRESS: parsed.IN_PROGRESS ?? true,
+          DONE: parsed.DONE ?? true,
+          ARCHIVE: parsed.ARCHIVE ?? false,
+        };
+        if (Object.values(next).some(Boolean)) setVisibleStatuses(next);
+      }
+    } catch {
+      // ignore corrupted localStorage
+    }
+
+    try {
+      const rawFilters = localStorage.getItem(KANBAN_COLUMN_FILTERS_KEY);
+      if (rawFilters) {
+        const parsed = JSON.parse(rawFilters) as Partial<Record<VulnStatus, Partial<Record<Severity, boolean>>>>;
+        const defaultFilter: Record<Severity, boolean> = {
+          CRITICAL: true,
+          HIGH: true,
+          MEDIUM: true,
+          LOW: true,
+          INFO: true,
+        };
+        const merged: Record<VulnStatus, Record<Severity, boolean>> = {
+          TODO: { ...defaultFilter, ...(parsed.TODO ?? {}) },
+          IN_PROGRESS: { ...defaultFilter, ...(parsed.IN_PROGRESS ?? {}) },
+          DONE: { ...defaultFilter, ...(parsed.DONE ?? {}) },
+          ARCHIVE: { ...defaultFilter, ...(parsed.ARCHIVE ?? {}) },
+        };
+        setColumnSeverityFilters(merged);
+      }
+    } catch {
+      // ignore corrupted localStorage
+    }
+
+    try {
+      const rawMetrics = localStorage.getItem(KANBAN_VISIBLE_METRICS_KEY);
+      if (rawMetrics) {
+        const parsed = JSON.parse(rawMetrics) as Partial<Record<MetricCardId, boolean>>;
+        const next: Record<MetricCardId, boolean> = {
+          total: parsed.total ?? true,
+          open: parsed.open ?? true,
+          inProgress: parsed.inProgress ?? true,
+          criticalOpen: parsed.criticalOpen ?? true,
+          acknowledged: parsed.acknowledged ?? true,
+        };
+        if (Object.values(next).some(Boolean)) setVisibleMetrics(next);
+      }
+    } catch {
+      // ignore corrupted localStorage
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(KANBAN_VISIBLE_COLUMNS_KEY, JSON.stringify(visibleStatuses));
+  }, [visibleStatuses]);
+
+  useEffect(() => {
+    localStorage.setItem(KANBAN_COLUMN_FILTERS_KEY, JSON.stringify(columnSeverityFilters));
+  }, [columnSeverityFilters]);
+
+  useEffect(() => {
+    localStorage.setItem(KANBAN_VISIBLE_METRICS_KEY, JSON.stringify(visibleMetrics));
+  }, [visibleMetrics]);
+
+  const acknowledgedCount = useMemo(() => vulns.filter((v) => v.status === "ARCHIVE").length, [vulns]);
+
+  function toggleMetricVisibility(metric: MetricCardId) {
+    setVisibleMetrics((prev) => {
+      const next = { ...prev, [metric]: !prev[metric] };
+      if (!Object.values(next).some(Boolean)) return prev;
+      return next;
+    });
+  }
 
   function toggleSeverityForColumn(status: VulnStatus, severity: Severity) {
     setColumnSeverityFilters((prev) => {
@@ -547,24 +655,148 @@ export function Dashboard() {
     setEditTarget(null);
   }
 
-  async function onImportFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+  function onImportFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] ?? null;
     e.target.value = "";
-    if (!file || !importSlug) return;
+    setSelectedImportFile(file);
+    setImportMsg(null);
+    setImportPreviewKind(null);
+    setImportPreviewItems([]);
+    setImportPreviewTotal(0);
+    setImportPreviewCreateCount(0);
+    setImportPreviewSecondaryCount(0);
+  }
+
+  async function previewImportFile() {
+    if (!selectedImportFile || !importSlug || isSentineloneImport) return;
+    setPreviewBusy(true);
+    setImportMsg(null);
+    try {
+      const fd = new FormData();
+      fd.set("file", selectedImportFile);
+      fd.set("templateSlug", importSlug);
+      const res = await fetch("/api/import/preview", { method: "POST", body: fd });
+      const data = await parseJson<{
+        total: number;
+        createCount: number;
+        updateCount: number;
+        skipCount: number;
+        items: ImportPreviewItem[];
+      }>(res);
+      setImportPreviewKind("file");
+      setImportPreviewItems(data.items);
+      setImportPreviewTotal(data.total);
+      setImportPreviewCreateCount(data.createCount);
+      setImportPreviewSecondaryCount(data.updateCount + data.skipCount);
+      setImportMsg(
+        `Prévisualisation: ${data.createCount} création(s), ${data.updateCount} mise(s) à jour, ${data.skipCount} doublon(s), ${data.total} total.`,
+      );
+    } catch (err) {
+      setImportMsg(err instanceof Error ? err.message : "Prévisualisation échouée");
+    } finally {
+      setPreviewBusy(false);
+    }
+  }
+
+  async function confirmImportFile() {
+    if (!selectedImportFile || !importSlug || isSentineloneImport) return;
     setImportBusy(true);
     setImportMsg(null);
     try {
       const fd = new FormData();
-      fd.set("file", file);
+      fd.set("file", selectedImportFile);
       fd.set("templateSlug", importSlug);
       const res = await fetch("/api/import", { method: "POST", body: fd });
-      const data = await parseJson<{ created: number; updated: number; total: number }>(res);
-      setImportMsg(`${data.created} créée(s), ${data.updated} mise(s) à jour (${data.total} au total).`);
+      const data = await parseJson<{ created: number; updated: number; skipped: number; total: number }>(res);
+      setImportMsg(
+        `${data.created} créée(s), ${data.updated} mise(s) à jour, ${data.skipped} doublon(s) ignoré(s) (${data.total} au total).`,
+      );
+      setSelectedImportFile(null);
+      setImportPreviewKind(null);
+      setImportPreviewItems([]);
+      setImportPreviewTotal(0);
+      setImportPreviewCreateCount(0);
+      setImportPreviewSecondaryCount(0);
       await load();
     } catch (err) {
       setImportMsg(err instanceof Error ? err.message : "Import échoué");
     } finally {
       setImportBusy(false);
+    }
+  }
+
+  async function previewSentinelOneIspm(e: React.FormEvent) {
+    e.preventDefault();
+    const tenantUrl = s1TenantUrl.trim();
+    const token = s1Token.trim();
+    const siteIds = s1SiteIds.trim();
+    if (!tenantUrl || !token || !siteIds) {
+      setImportMsg("URL tenant, token et siteIds sont requis.");
+      return;
+    }
+
+    setS1Busy(true);
+    setImportMsg(null);
+    try {
+      const res = await fetch("/api/import/sentinelone-ispm/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tenantUrl, token, siteIds }),
+      });
+      const data = await parseJson<{
+        total: number;
+        createCount: number;
+        skipCount: number;
+        items: ImportPreviewItem[];
+      }>(res);
+      setImportPreviewKind("sentinelone");
+      setImportPreviewItems(data.items);
+      setImportPreviewTotal(data.total);
+      setImportPreviewCreateCount(data.createCount);
+      setImportPreviewSecondaryCount(data.skipCount);
+      setImportMsg(
+        `Prévisualisation: ${data.createCount} création(s), ${data.skipCount} doublon(s), ${data.total} total.`,
+      );
+    } catch (err) {
+      setImportMsg(err instanceof Error ? err.message : "Prévisualisation SentinelOne échouée");
+    } finally {
+      setS1Busy(false);
+    }
+  }
+
+  async function confirmSentinelOneIspmImport() {
+    const tenantUrl = s1TenantUrl.trim();
+    const token = s1Token.trim();
+    const siteIds = s1SiteIds.trim();
+    if (!tenantUrl || !token || !siteIds) {
+      setImportMsg("URL tenant, token et siteIds sont requis.");
+      return;
+    }
+    setS1Busy(true);
+    setImportMsg(null);
+    try {
+      const res = await fetch("/api/import/sentinelone-ispm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tenantUrl, token, siteIds }),
+      });
+      const data = await parseJson<{ created: number; skipped: number; total: number }>(res);
+      setImportMsg(
+        `${data.created} créée(s), ${data.skipped} ignorée(s) (doublons), ${data.total} alerte(s) traitée(s).`,
+      );
+      setImportPreviewKind(null);
+      setImportPreviewItems([]);
+      setImportPreviewTotal(0);
+      setImportPreviewCreateCount(0);
+      setImportPreviewSecondaryCount(0);
+      setS1TenantUrl("");
+      setS1Token("");
+      setS1SiteIds("");
+      await load();
+    } catch (err) {
+      setImportMsg(err instanceof Error ? err.message : "Import SentinelOne échoué");
+    } finally {
+      setS1Busy(false);
     }
   }
 
@@ -593,6 +825,16 @@ export function Dashboard() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
             </svg>
             Ajouter une tâche
+          </button>
+          <button
+            type="button"
+            onClick={() => setImportOpen(true)}
+            className="ui-btn-secondary inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold shadow-sm"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.9} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 8.25 12 3.75m0 0L7.5 8.25M12 3.75V15" />
+            </svg>
+            Importer
           </button>
           <button
             type="button"
@@ -636,125 +878,93 @@ export function Dashboard() {
       </header>
 
       {!loading ? (
-        <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div className="ui-card flex flex-col justify-center px-4 py-3.5">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">Total</p>
-            <p className="mt-0.5 text-2xl font-bold tabular-nums text-[var(--text)]">{stats.total}</p>
-          </div>
-          <div className="ui-card flex flex-col justify-center px-4 py-3.5">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">Ouvertes</p>
-            <p className="mt-0.5 text-2xl font-bold tabular-nums text-[var(--accent)]">{stats.open}</p>
-          </div>
-          <div className="ui-card flex flex-col justify-center border-sky-500/20 bg-sky-500/[0.06] px-4 py-3.5 dark:bg-sky-500/10">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-sky-800 dark:text-sky-200/90">
-              En cours
-            </p>
-            <p className="mt-0.5 text-2xl font-bold tabular-nums text-sky-900 dark:text-sky-100">
-              {stats.inProgress}
-            </p>
-          </div>
-          <div className="ui-card flex flex-col justify-center border-red-500/15 bg-red-500/[0.04] px-4 py-3.5 dark:bg-red-500/10">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-red-800/90 dark:text-red-200/80">
-              Critiques ouvertes
-            </p>
-            <p className="mt-0.5 text-2xl font-bold tabular-nums text-red-700 dark:text-red-300">
-              {stats.criticalOpen}
-            </p>
-          </div>
-          <div className="ui-card flex flex-col justify-center px-4 py-3.5">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">
-              Acquittées
-            </p>
-            <p className="mt-0.5 text-2xl font-bold tabular-nums text-[var(--text)]">
-              {acknowledgedCount}
-            </p>
+        <div className="relative mb-8">
+          <button
+            type="button"
+            onClick={() => setShowMetricsSettings((v) => !v)}
+            className="absolute -top-2 right-0 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface-muted)] text-[var(--muted)] shadow-sm transition hover:border-[var(--accent)] hover:bg-[var(--accent-subtle)] hover:text-[var(--text)]"
+            aria-label="Personnaliser les indicateurs"
+            title="Personnaliser les indicateurs"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.7} viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.72 7.72 0 0 1 0 .255c-.008.378.137.75.43.991l1.003.827c.424.35.534.954.26 1.43l-1.296 2.247a1.125 1.125 0 0 1-1.37.491l-1.216-.456c-.356-.133-.751-.072-1.076.124a6.52 6.52 0 0 1-.22.128c-.332.183-.582.495-.644.869l-.214 1.281c-.09.543-.56.94-1.11.94h-2.593c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49L3.21 15.36a1.125 1.125 0 0 1 .26-1.43l1.004-.828c.292-.24.437-.613.43-.991a7.72 7.72 0 0 1 0-.255c.007-.38-.138-.751-.43-.992L3.47 9.037a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.217.456c.355.133.75.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"
+              />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+            </svg>
+          </button>
+          {showMetricsSettings ? (
+            <div className="absolute right-0 top-7 z-20 w-56 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-3 shadow-xl">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">Indicateurs visibles</p>
+              <div className="mt-2 flex flex-col gap-1.5">
+                <label className="inline-flex cursor-pointer items-center gap-2 text-[11px] text-[var(--muted)]">
+                  <input type="checkbox" checked={visibleMetrics.total} onChange={() => toggleMetricVisibility("total")} className="h-3.5 w-3.5 rounded border-[var(--border)]" />
+                  <span>Total</span>
+                </label>
+                <label className="inline-flex cursor-pointer items-center gap-2 text-[11px] text-[var(--muted)]">
+                  <input type="checkbox" checked={visibleMetrics.open} onChange={() => toggleMetricVisibility("open")} className="h-3.5 w-3.5 rounded border-[var(--border)]" />
+                  <span>Ouvertes</span>
+                </label>
+                <label className="inline-flex cursor-pointer items-center gap-2 text-[11px] text-[var(--muted)]">
+                  <input type="checkbox" checked={visibleMetrics.inProgress} onChange={() => toggleMetricVisibility("inProgress")} className="h-3.5 w-3.5 rounded border-[var(--border)]" />
+                  <span>En cours</span>
+                </label>
+                <label className="inline-flex cursor-pointer items-center gap-2 text-[11px] text-[var(--muted)]">
+                  <input type="checkbox" checked={visibleMetrics.criticalOpen} onChange={() => toggleMetricVisibility("criticalOpen")} className="h-3.5 w-3.5 rounded border-[var(--border)]" />
+                  <span>Critiques ouvertes</span>
+                </label>
+                <label className="inline-flex cursor-pointer items-center gap-2 text-[11px] text-[var(--muted)]">
+                  <input type="checkbox" checked={visibleMetrics.acknowledged} onChange={() => toggleMetricVisibility("acknowledged")} className="h-3.5 w-3.5 rounded border-[var(--border)]" />
+                  <span>Acquittées</span>
+                </label>
+              </div>
+            </div>
+          ) : null}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {visibleMetrics.total ? (
+              <div className="ui-card flex flex-col justify-center px-4 py-3.5">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">Total</p>
+                <p className="mt-0.5 text-2xl font-bold tabular-nums text-[var(--text)]">{stats.total}</p>
+              </div>
+            ) : null}
+            {visibleMetrics.open ? (
+              <div className="ui-card flex flex-col justify-center px-4 py-3.5">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">Ouvertes</p>
+                <p className="mt-0.5 text-2xl font-bold tabular-nums text-[var(--accent)]">{stats.open}</p>
+              </div>
+            ) : null}
+            {visibleMetrics.inProgress ? (
+              <div className="ui-card flex flex-col justify-center border-sky-500/20 bg-sky-500/[0.06] px-4 py-3.5 dark:bg-sky-500/10">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-sky-800 dark:text-sky-200/90">
+                  En cours
+                </p>
+                <p className="mt-0.5 text-2xl font-bold tabular-nums text-sky-900 dark:text-sky-100">
+                  {stats.inProgress}
+                </p>
+              </div>
+            ) : null}
+            {visibleMetrics.criticalOpen ? (
+              <div className="ui-card flex flex-col justify-center border-red-500/15 bg-red-500/[0.04] px-4 py-3.5 dark:bg-red-500/10">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-red-800/90 dark:text-red-200/80">
+                  Critiques ouvertes
+                </p>
+                <p className="mt-0.5 text-2xl font-bold tabular-nums text-red-700 dark:text-red-300">
+                  {stats.criticalOpen}
+                </p>
+              </div>
+            ) : null}
+            {visibleMetrics.acknowledged ? (
+              <div className="ui-card flex flex-col justify-center px-4 py-3.5">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">Acquittées</p>
+                <p className="mt-0.5 text-2xl font-bold tabular-nums text-[var(--text)]">{acknowledgedCount}</p>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}
 
-
-      <section className="ui-card relative mb-8 overflow-hidden p-5 lg:p-6">
-        <div className="pointer-events-none absolute inset-y-0 right-0 w-32 bg-gradient-to-l from-[var(--accent-subtle)] to-transparent opacity-60" />
-        <div className="relative flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h2 className="flex items-center gap-2 text-sm font-bold text-[var(--text)]">
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--accent-subtle)] text-[var(--accent)]">
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
-                </svg>
-              </span>
-              Importer un rapport
-            </h2>
-            <p className="mt-2 max-w-xl text-xs leading-relaxed text-[var(--muted)]">
-              Sélectionnez un modèle (PingCastle, CSV…), déposez le fichier : les vulnérabilités sont créées
-              ou mises à jour automatiquement.
-            </p>
-          </div>
-          <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center lg:w-auto">
-            <select
-              value={importSlug}
-              onChange={(e) => setImportSlug(e.target.value)}
-              className="ui-input w-full min-w-[12rem] px-3 py-2.5 text-sm lg:max-w-xs"
-            >
-              {templates.map((t) => (
-                <option key={t.id} value={t.slug}>
-                  {t.name} ({t.fileHint})
-                </option>
-              ))}
-            </select>
-            <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-[var(--radius-md)] border border-dashed border-[var(--border-strong)] bg-[var(--surface-muted)] px-4 py-2.5 text-sm font-semibold text-[var(--text)] transition hover:border-[var(--accent)] hover:bg-[var(--accent-subtle)] sm:shrink-0">
-              <svg className="h-4 w-4 text-[var(--accent)]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m6.713-6.713l3-3" />
-              </svg>
-              <input
-                type="file"
-                className="hidden"
-                disabled={importBusy || !importSlug}
-                onChange={onImportFile}
-              />
-              {importBusy ? "Import en cours…" : "Parcourir les fichiers"}
-            </label>
-          </div>
-        </div>
-        <div className="relative mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          {importMsg ? (
-            <p className="rounded-lg bg-[var(--column)] px-3 py-2 text-sm text-[var(--text)]">
-              {importMsg}
-            </p>
-          ) : (
-            <p className="text-xs text-[var(--muted)]">
-              Pour le CSV générique, vous pouvez partir d’un fichier modèle avec les colonnes obligatoires.
-            </p>
-          )}
-          <button
-            type="button"
-            onClick={() => {
-              const header = "title,severity,description,externalRef\n";
-              const exampleLine =
-                'Compte administrateur dormant,MEDIUM,"Compte admin sans connexion depuis 90 jours",ADM-001\n';
-              const blob = new Blob([header + exampleLine], { type: "text/csv;charset=utf-8" });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement("a");
-              a.href = url;
-              a.download = "modele_import_vulnerabilites.csv";
-              document.body.appendChild(a);
-              a.click();
-              document.body.removeChild(a);
-              URL.revokeObjectURL(url);
-            }}
-            className="ui-btn-secondary inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold"
-          >
-            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12 12 16.5M12 16.5 7.5 12M12 16.5V3"
-              />
-            </svg>
-            Télécharger un modèle CSV
-          </button>
-        </div>
-      </section>
 
       {error ? (
         <p className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-800 dark:text-red-200">
@@ -1009,6 +1219,215 @@ export function Dashboard() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      ) : null}
+      {importOpen ? (
+        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/45 p-4 backdrop-blur-[2px] sm:items-center">
+          <div
+            className="ui-card w-full max-w-md p-6 shadow-xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="import-title"
+          >
+            <h2 id="import-title" className="text-lg font-bold text-[var(--text)]">
+              Importer un rapport
+            </h2>
+            <div className="mt-4 flex flex-col gap-3">
+              <label className="text-xs font-medium text-[var(--muted)]">
+                Modèle d’import
+                <select
+                  value={importSlug}
+                  onChange={(e) => {
+                    setImportSlug(e.target.value);
+                    setImportMsg(null);
+                    setSelectedImportFile(null);
+                    setImportPreviewKind(null);
+                    setImportPreviewItems([]);
+                    setImportPreviewTotal(0);
+                    setImportPreviewCreateCount(0);
+                    setImportPreviewSecondaryCount(0);
+                  }}
+                  className="ui-input mt-1 w-full px-3 py-2.5 text-sm"
+                >
+                  {templates.map((t) => (
+                    <option key={t.id} value={t.slug}>
+                      {t.name} ({t.fileHint})
+                    </option>
+                  ))}
+                  <option value={SENTINELONE_OPTION}>SentinelOne ISPM (API)</option>
+                </select>
+              </label>
+              {!isSentineloneImport ? (
+                <>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-[var(--radius-md)] border border-dashed border-[var(--border-strong)] bg-[var(--surface-muted)] px-4 py-2.5 text-sm font-semibold text-[var(--text)] transition hover:border-[var(--accent)] hover:bg-[var(--accent-subtle)]">
+                      <svg className="h-4 w-4 text-[var(--accent)]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m6.713-6.713l3-3" />
+                      </svg>
+                      <input
+                        type="file"
+                        className="hidden"
+                        disabled={importBusy || previewBusy || !importSlug}
+                        onChange={onImportFileSelected}
+                      />
+                      {selectedImportFile ? selectedImportFile.name : "Choisir un fichier"}
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => void previewImportFile()}
+                      disabled={!selectedImportFile || !importSlug || previewBusy || importBusy}
+                      className="ui-btn-secondary inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {previewBusy ? "Prévisualisation..." : "Prévisualiser"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const header = "title,severity,description,externalRef\n";
+                        const exampleLine =
+                          'Compte administrateur dormant,MEDIUM,"Compte admin sans connexion depuis 90 jours",ADM-001\n';
+                        const blob = new Blob([header + exampleLine], { type: "text/csv;charset=utf-8" });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.download = "modele_import_vulnerabilites.csv";
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                      }}
+                      className="ui-btn-secondary inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold"
+                    >
+                      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5M12 16.5 7.5 12M12 16.5V3"
+                        />
+                      </svg>
+                      Télécharger le template
+                    </button>
+                  </div>
+                  {importPreviewKind === "file" ? (
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => void confirmImportFile()}
+                        disabled={importBusy || !selectedImportFile}
+                        className="ui-btn-primary px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {importBusy ? "Import..." : "Valider l'import fichier"}
+                      </button>
+                    </div>
+                  ) : null}
+                </>
+              ) : null}
+              {isSentineloneImport ? (
+                <form onSubmit={previewSentinelOneIspm} className="mt-2 rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] p-3">
+                <p className="text-xs font-semibold text-[var(--text)]">Import SentinelOne ISPM</p>
+                <div className="mt-2 grid gap-2">
+                  <input
+                    type="url"
+                    value={s1TenantUrl}
+                    onChange={(e) => setS1TenantUrl(e.target.value)}
+                    className="ui-input w-full px-3 py-2 text-xs"
+                    placeholder="URL tenant (ex: https://xxx.sentinelone.net)"
+                    autoComplete="off"
+                  />
+                  <input
+                    type="password"
+                    value={s1Token}
+                    onChange={(e) => setS1Token(e.target.value)}
+                    className="ui-input w-full px-3 py-2 text-xs"
+                    placeholder="API token"
+                    autoComplete="off"
+                  />
+                  <input
+                    type="text"
+                    value={s1SiteIds}
+                    onChange={(e) => setS1SiteIds(e.target.value)}
+                    className="ui-input w-full px-3 py-2 text-xs"
+                    placeholder="siteIds (ex: 12345 ou 12345,67890)"
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="mt-2 flex justify-end gap-2">
+                  <button type="submit" disabled={s1Busy} className="ui-btn-secondary px-3 py-2 text-xs font-semibold">
+                    {s1Busy ? "Prévisualisation..." : "Prévisualiser SentinelOne"}
+                  </button>
+                  {importPreviewKind === "sentinelone" ? (
+                    <button
+                      type="button"
+                      onClick={() => void confirmSentinelOneIspmImport()}
+                      disabled={s1Busy}
+                      className="ui-btn-primary px-3 py-2 text-xs font-semibold"
+                    >
+                      {s1Busy ? "Import..." : "Valider l'import SentinelOne"}
+                    </button>
+                  ) : null}
+                </div>
+                </form>
+              ) : null}
+              {importPreviewKind ? (
+                <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] p-3">
+                  <div className="mb-2 flex items-center justify-between text-xs">
+                    <p className="font-semibold text-[var(--text)]">Prévisualisation</p>
+                    <p className="text-[var(--muted)]">
+                      {importPreviewCreateCount} création(s), {importPreviewSecondaryCount}{" "}
+                      {importPreviewKind === "file" ? "mise(s) à jour" : "doublon(s)"}, {importPreviewTotal} total
+                    </p>
+                  </div>
+                  <ul className="max-h-56 space-y-1 overflow-auto">
+                    {importPreviewItems.map((item, idx) => (
+                      <li
+                        key={`${item.externalRef ?? "no-ref"}-${idx}`}
+                        className="flex items-center justify-between rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-[11px]"
+                      >
+                        <span className="truncate text-[var(--text)]">
+                          {item.title} <span className="text-[var(--muted)]">({severityLabel[item.severity]})</span>
+                        </span>
+                        <span
+                          className={`ml-2 shrink-0 rounded px-1.5 py-0.5 ${
+                            item.action === "create"
+                              ? "bg-emerald-500/15 text-emerald-700"
+                              : item.action === "update"
+                                ? "bg-amber-500/15 text-amber-800"
+                                : "bg-zinc-500/15 text-[var(--muted)]"
+                          }`}
+                        >
+                          {item.action === "create" ? "Créer" : item.action === "update" ? "Mettre à jour" : "Ignorer"}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {importMsg ? (
+                <p className="rounded-lg bg-[var(--column)] px-3 py-2 text-sm text-[var(--text)]">{importMsg}</p>
+              ) : null}
+              <div className="mt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImportOpen(false);
+                    setImportMsg(null);
+                    setS1TenantUrl("");
+                    setS1Token("");
+                    setS1SiteIds("");
+                    setSelectedImportFile(null);
+                    setImportPreviewKind(null);
+                    setImportPreviewItems([]);
+                    setImportPreviewTotal(0);
+                    setImportPreviewCreateCount(0);
+                    setImportPreviewSecondaryCount(0);
+                  }}
+                  className="ui-btn-secondary px-4 py-2.5 text-sm text-[var(--muted)]"
+                >
+                  Fermer
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       ) : null}

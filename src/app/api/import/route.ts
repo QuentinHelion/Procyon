@@ -54,6 +54,7 @@ export async function POST(request: Request) {
 
   let created = 0;
   let updated = 0;
+  let skipped = 0;
 
   for (const item of parsed.items) {
     const meta = { ...(item.metadata ?? {}), templateSlug: template.slug };
@@ -89,6 +90,17 @@ export async function POST(request: Request) {
         created++;
       }
     } else {
+      const duplicate = await prisma.vulnerability.findFirst({
+        where: {
+          title: item.title,
+          severity: item.severity,
+        },
+        select: { id: true },
+      });
+      if (duplicate) {
+        skipped++;
+        continue;
+      }
       await prisma.vulnerability.create({
         data: {
           title: item.title,
@@ -112,6 +124,7 @@ export async function POST(request: Request) {
     batchId: batch.id,
     created,
     updated,
+    skipped,
     total: parsed.items.length,
   });
 }

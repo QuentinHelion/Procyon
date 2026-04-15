@@ -49,7 +49,7 @@ export function AppSidebar() {
     {
       href: "/planning",
       label: t("Planning", "Planning"),
-      description: t("Deadlines & Gantt", "Échéances & Gantt"),
+      description: t("Calendar & deadlines", "Calendrier & échéances"),
       icon: IconPlanning,
     },
     {
