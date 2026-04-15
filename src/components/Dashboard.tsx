@@ -56,7 +56,9 @@ const KANBAN_VISIBLE_COLUMNS_KEY = "procyon-kanban-visible-columns";
 const KANBAN_COLUMN_FILTERS_KEY = "procyon-kanban-column-filters";
 const KANBAN_VISIBLE_METRICS_KEY = "procyon-kanban-visible-metrics";
 type MetricCardId = "total" | "open" | "inProgress" | "criticalOpen" | "acknowledged";
-const SENTINELONE_OPTION = "__sentinelone_ispm__";
+const SENTINELONE_TEMPLATE_SLUG = "sentinelone-ispm-api";
+const KANBAN_CATEGORY_FILTERS_KEY = "procyon-kanban-category-filters";
+const KANBAN_SORT_KEY = "procyon-kanban-sort";
 type ImportPreviewAction = "create" | "update" | "skip";
 type ImportPreviewItem = {
   title: string;
@@ -64,6 +66,8 @@ type ImportPreviewItem = {
   externalRef: string | null;
   action: ImportPreviewAction;
 };
+type VulnCategory = "MANUAL" | "PINGCASTLE" | "GENERIC_CSV" | "SENTINELONE_ISPM" | "OTHER";
+type KanbanSort = "severity_desc" | "severity_asc" | "created_desc" | "created_asc" | "due_asc" | "due_desc";
 
 const severityStyle: Record<Severity, string> = {
   CRITICAL: "bg-red-600/15 text-red-700 dark:text-red-300",
@@ -128,6 +132,26 @@ function isVulnStatus(id: string | number): id is VulnStatus {
   return id === "TODO" || id === "IN_PROGRESS" || id === "DONE" || id === "ARCHIVE";
 }
 
+function vulnCategory(v: Vuln): VulnCategory {
+  if (v.source === "MANUAL") return "MANUAL";
+  const meta = (v.metadata && typeof v.metadata === "object" ? v.metadata : {}) as Record<string, unknown>;
+  const templateSlug =
+    typeof meta.templateSlug === "string" ? meta.templateSlug : "";
+  const provider = typeof meta.provider === "string" ? meta.provider : "";
+  if (provider === "sentinelone_ispm" || templateSlug === SENTINELONE_TEMPLATE_SLUG) return "SENTINELONE_ISPM";
+  if (templateSlug === "pingcastle-xml") return "PINGCASTLE";
+  if (templateSlug === "generic-csv") return "GENERIC_CSV";
+  return "OTHER";
+}
+
+const CATEGORY_LABEL: Record<VulnCategory, string> = {
+  MANUAL: "Manuel",
+  PINGCASTLE: "PingCastle",
+  GENERIC_CSV: "CSV générique",
+  SENTINELONE_ISPM: "SentinelOne ISPM",
+  OTHER: "Autre import",
+};
+
 function KanbanDroppableList({
   status,
   children,
@@ -152,15 +176,11 @@ function DashboardDraggableVulnCard({
   v,
   patchAcknowledge,
   patchStatus,
-  removeVuln,
-  setError,
   onEdit,
 }: {
   v: Vuln;
   patchAcknowledge: (id: string, acknowledged: boolean) => Promise<void>;
   patchStatus: (id: string, status: VulnStatus) => Promise<void>;
-  removeVuln: (id: string) => Promise<void>;
-  setError: (msg: string | null) => void;
   onEdit: (v: Vuln) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -301,27 +321,20 @@ function DashboardDraggableVulnCard({
                 Annuler l’acquittement
               </button>
             ) : null}
-            <div className="flex flex-wrap gap-1.5">
-              {v.status !== "ARCHIVE"
-                ? COLUMNS.filter((c) => c.status !== v.status).map((c) => (
-                <button
-                  key={c.status}
-                  type="button"
-                  onClick={() => void patchStatus(v.id, c.status)}
-                  className="rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--text)] transition hover:border-[var(--accent)] hover:bg-[var(--accent-subtle)]"
-                >
-                  {c.label}
-                </button>
-                  ))
-                : null}
-              <button
-                type="button"
-                onClick={() => void removeVuln(v.id).catch((err) => setError(String(err)))}
-                className="ml-auto rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-red-600 hover:bg-red-500/10 dark:text-red-400"
+            <label className="flex items-center gap-2 text-[11px] text-[var(--muted)]">
+              <span className="shrink-0">Statut</span>
+              <select
+                value={v.status}
+                onChange={(e) => void patchStatus(v.id, e.target.value as VulnStatus)}
+                className="ui-input min-w-0 flex-1 px-2 py-1.5 text-[11px]"
               >
-                Supprimer
-              </button>
-            </div>
+                {COLUMNS.map((c) => (
+                  <option key={c.status} value={c.status}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
         </div>
       </div>
@@ -354,7 +367,10 @@ export function Dashboard() {
   const [editTitle, setEditTitle] = useState("");
   const [editDesc, setEditDesc] = useState("");
   const [editSeverity, setEditSeverity] = useState<Severity>("MEDIUM");
+  const [editStatus, setEditStatus] = useState<VulnStatus>("TODO");
   const [editDue, setEditDue] = useState("");
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   const [importSlug, setImportSlug] = useState("");
   const [importBusy, setImportBusy] = useState(false);
@@ -371,7 +387,7 @@ export function Dashboard() {
   const [importPreviewTotal, setImportPreviewTotal] = useState(0);
   const [importPreviewCreateCount, setImportPreviewCreateCount] = useState(0);
   const [importPreviewSecondaryCount, setImportPreviewSecondaryCount] = useState(0);
-  const isSentineloneImport = importSlug === SENTINELONE_OPTION;
+  const isSentineloneImport = importSlug === SENTINELONE_TEMPLATE_SLUG;
 
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
@@ -385,7 +401,7 @@ export function Dashboard() {
       ]);
       setVulns(v);
       setTemplates(t);
-      setImportSlug((prev) => prev || (t[0]?.slug ?? SENTINELONE_OPTION));
+      setImportSlug((prev) => prev || (t[0]?.slug ?? SENTINELONE_TEMPLATE_SLUG));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erreur de chargement");
     } finally {
@@ -403,14 +419,6 @@ export function Dashboard() {
     for (const v of vulns) {
       const list = m.get(v.status);
       if (list) list.push(v);
-    }
-    for (const c of COLUMNS) {
-      m.set(
-        c.status,
-        (m.get(c.status) ?? []).sort(
-          (a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity),
-        ),
-      );
     }
     return m;
   }, [vulns]);
@@ -450,6 +458,14 @@ export function Dashboard() {
     criticalOpen: true,
     acknowledged: true,
   });
+  const [categoryFilters, setCategoryFilters] = useState<Record<VulnCategory, boolean>>({
+    MANUAL: true,
+    PINGCASTLE: true,
+    GENERIC_CSV: true,
+    SENTINELONE_ISPM: true,
+    OTHER: true,
+  });
+  const [kanbanSort, setKanbanSort] = useState<KanbanSort>("severity_desc");
 
   useEffect(() => {
     try {
@@ -507,6 +523,39 @@ export function Dashboard() {
     } catch {
       // ignore corrupted localStorage
     }
+
+    try {
+      const rawCategories = localStorage.getItem(KANBAN_CATEGORY_FILTERS_KEY);
+      if (rawCategories) {
+        const parsed = JSON.parse(rawCategories) as Partial<Record<VulnCategory, boolean>>;
+        const next: Record<VulnCategory, boolean> = {
+          MANUAL: parsed.MANUAL ?? true,
+          PINGCASTLE: parsed.PINGCASTLE ?? true,
+          GENERIC_CSV: parsed.GENERIC_CSV ?? true,
+          SENTINELONE_ISPM: parsed.SENTINELONE_ISPM ?? true,
+          OTHER: parsed.OTHER ?? true,
+        };
+        if (Object.values(next).some(Boolean)) setCategoryFilters(next);
+      }
+    } catch {
+      // ignore corrupted localStorage
+    }
+
+    try {
+      const rawSort = localStorage.getItem(KANBAN_SORT_KEY);
+      if (
+        rawSort === "severity_desc" ||
+        rawSort === "severity_asc" ||
+        rawSort === "created_desc" ||
+        rawSort === "created_asc" ||
+        rawSort === "due_asc" ||
+        rawSort === "due_desc"
+      ) {
+        setKanbanSort(rawSort);
+      }
+    } catch {
+      // ignore corrupted localStorage
+    }
   }, []);
 
   useEffect(() => {
@@ -520,6 +569,12 @@ export function Dashboard() {
   useEffect(() => {
     localStorage.setItem(KANBAN_VISIBLE_METRICS_KEY, JSON.stringify(visibleMetrics));
   }, [visibleMetrics]);
+  useEffect(() => {
+    localStorage.setItem(KANBAN_CATEGORY_FILTERS_KEY, JSON.stringify(categoryFilters));
+  }, [categoryFilters]);
+  useEffect(() => {
+    localStorage.setItem(KANBAN_SORT_KEY, kanbanSort);
+  }, [kanbanSort]);
 
   const acknowledgedCount = useMemo(() => vulns.filter((v) => v.status === "ARCHIVE").length, [vulns]);
 
@@ -529,6 +584,37 @@ export function Dashboard() {
       if (!Object.values(next).some(Boolean)) return prev;
       return next;
     });
+  }
+
+  function toggleCategoryFilter(category: VulnCategory) {
+    setCategoryFilters((prev) => {
+      const next = { ...prev, [category]: !prev[category] };
+      if (!Object.values(next).some(Boolean)) return prev;
+      return next;
+    });
+  }
+
+  function compareVulns(a: Vuln, b: Vuln): number {
+    if (kanbanSort === "severity_desc") {
+      return SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity);
+    }
+    if (kanbanSort === "severity_asc") {
+      return SEVERITY_ORDER.indexOf(b.severity) - SEVERITY_ORDER.indexOf(a.severity);
+    }
+    if (kanbanSort === "created_asc") {
+      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    }
+    if (kanbanSort === "created_desc") {
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    }
+    if (kanbanSort === "due_asc") {
+      const ad = a.dueAt ? new Date(a.dueAt).getTime() : Number.POSITIVE_INFINITY;
+      const bd = b.dueAt ? new Date(b.dueAt).getTime() : Number.POSITIVE_INFINITY;
+      return ad - bd;
+    }
+    const ad = a.dueAt ? new Date(a.dueAt).getTime() : Number.NEGATIVE_INFINITY;
+    const bd = b.dueAt ? new Date(b.dueAt).getTime() : Number.NEGATIVE_INFINITY;
+    return bd - ad;
   }
 
   function toggleSeverityForColumn(status: VulnStatus, severity: Severity) {
@@ -614,11 +700,28 @@ export function Dashboard() {
     setVulns((prev) => prev.filter((x) => x.id !== id));
   }
 
+  async function confirmDeleteFromEdit() {
+    if (!editTarget || deleteBusy) return;
+    setDeleteBusy(true);
+    setError(null);
+    try {
+      await removeVuln(editTarget.id);
+      setDeleteConfirmOpen(false);
+      setEditOpen(false);
+      setEditTarget(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Suppression impossible");
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
   function openEdit(v: Vuln) {
     setEditTarget(v);
     setEditTitle(v.title);
     setEditDesc(v.description ?? "");
     setEditSeverity(v.severity);
+    setEditStatus(v.status);
     setEditDue(v.dueAt ? new Date(v.dueAt).toISOString().slice(0, 10) : "");
     setEditOpen(true);
   }
@@ -638,6 +741,7 @@ export function Dashboard() {
       title: editTitle,
       description: editDesc || null,
       severity: editSeverity,
+      status: editStatus,
     };
     if (editDue.trim() === "") {
       payload.dueAt = null;
@@ -810,10 +914,6 @@ export function Dashboard() {
           <h1 className="mt-1 text-2xl font-bold tracking-tight text-[var(--text)] sm:text-3xl">
             Tableau de bord
           </h1>
-          <p className="mt-2 max-w-lg text-sm leading-relaxed text-[var(--muted)]">
-            Priorisez, acquittez, modifiez et faites avancer les fiches — la gravité est sur le bord gauche.
-            Glissez une carte depuis la poignée à gauche pour changer la colonne (statut).
-          </p>
         </div>
         <div className="relative flex shrink-0 flex-wrap items-start gap-2">
           <button
@@ -871,6 +971,42 @@ export function Dashboard() {
                     <span>{c.label}</span>
                   </label>
                 ))}
+              </div>
+              <div className="mt-3 border-t border-[var(--border)] pt-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                  Catégories visibles
+                </p>
+                <div className="mt-2 flex flex-col gap-1.5">
+                  {(Object.keys(CATEGORY_LABEL) as VulnCategory[]).map((category) => (
+                    <label
+                      key={category}
+                      className="inline-flex cursor-pointer items-center gap-2 text-[11px] text-[var(--muted)]"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={categoryFilters[category]}
+                        onChange={() => toggleCategoryFilter(category)}
+                        className="h-3.5 w-3.5 rounded border-[var(--border)]"
+                      />
+                      <span>{CATEGORY_LABEL[category]}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="mt-3 border-t border-[var(--border)] pt-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">Tri</p>
+                <select
+                  value={kanbanSort}
+                  onChange={(e) => setKanbanSort(e.target.value as KanbanSort)}
+                  className="ui-input mt-1 w-full px-2 py-1.5 text-[11px]"
+                >
+                  <option value="severity_desc">Criticité (haute - basse)</option>
+                  <option value="severity_asc">Criticité (basse - haute)</option>
+                  <option value="created_desc">Date de création (récent - ancien)</option>
+                  <option value="created_asc">Date de création (ancien - récent)</option>
+                  <option value="due_asc">Échéance (proche - lointaine)</option>
+                  <option value="due_desc">Échéance (lointaine - proche)</option>
+                </select>
               </div>
             </div>
           ) : null}
@@ -1001,9 +1137,10 @@ export function Dashboard() {
             }}
           >
             {COLUMNS.filter((col) => visibleStatuses[col.status]).map((col) => {
-              const filteredColumnItems = (byStatus.get(col.status) ?? []).filter(
-                (v) => columnSeverityFilters[col.status][v.severity],
-              );
+              const filteredColumnItems = (byStatus.get(col.status) ?? [])
+                .filter((v) => columnSeverityFilters[col.status][v.severity])
+                .filter((v) => categoryFilters[vulnCategory(v)])
+                .sort(compareVulns);
               const count = filteredColumnItems.length;
               return (
                 <div
@@ -1052,8 +1189,6 @@ export function Dashboard() {
                         v={v}
                         patchAcknowledge={patchAcknowledge}
                         patchStatus={patchStatus}
-                        removeVuln={removeVuln}
-                        setError={setError}
                         onEdit={openEdit}
                       />
                     ))}
@@ -1125,6 +1260,20 @@ export function Dashboard() {
                 </select>
               </label>
               <label className="text-xs font-medium text-[var(--muted)]">
+                Catégorie
+                <select
+                  value={editStatus}
+                  onChange={(e) => setEditStatus(e.target.value as VulnStatus)}
+                  className="ui-input mt-1 w-full px-3 py-2.5 text-sm"
+                >
+                  {COLUMNS.map((c) => (
+                    <option key={c.status} value={c.status}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs font-medium text-[var(--muted)]">
                 Échéance (optionnel)
                 <input
                   type="date"
@@ -1136,9 +1285,17 @@ export function Dashboard() {
               <div className="mt-2 flex justify-end gap-2">
                 <button
                   type="button"
+                  onClick={() => setDeleteConfirmOpen(true)}
+                  className="mr-auto rounded-lg border border-red-500/35 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-500/15 dark:text-red-300"
+                >
+                  Supprimer
+                </button>
+                <button
+                  type="button"
                   onClick={() => {
                     setEditOpen(false);
                     setEditTarget(null);
+                    setDeleteConfirmOpen(false);
                   }}
                   className="ui-btn-secondary px-4 py-2.5 text-sm text-[var(--muted)]"
                 >
@@ -1149,6 +1306,36 @@ export function Dashboard() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      ) : null}
+      {deleteConfirmOpen && editTarget ? (
+        <div className="fixed inset-0 z-[95] flex items-end justify-center bg-black/55 p-4 backdrop-blur-[2px] sm:items-center">
+          <div className="ui-card w-full max-w-sm p-5 shadow-xl" role="dialog" aria-modal="true" aria-labelledby="delete-title">
+            <h3 id="delete-title" className="text-base font-bold text-[var(--text)]">
+              Confirmer la suppression
+            </h3>
+            <p className="mt-2 text-sm text-[var(--muted)]">
+              Cette action va supprimer définitivement la tâche <span className="font-semibold text-[var(--text)]">&quot;{editTarget.title}&quot;</span>.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmOpen(false)}
+                disabled={deleteBusy}
+                className="ui-btn-secondary px-4 py-2 text-sm text-[var(--muted)] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDeleteFromEdit()}
+                disabled={deleteBusy}
+                className="rounded-lg border border-red-500/35 bg-red-500/10 px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-300"
+              >
+                {deleteBusy ? "Suppression..." : "Confirmer"}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
@@ -1225,7 +1412,7 @@ export function Dashboard() {
       {importOpen ? (
         <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/45 p-4 backdrop-blur-[2px] sm:items-center">
           <div
-            className="ui-card w-full max-w-md p-6 shadow-xl"
+            className="ui-card w-full max-w-md overflow-hidden p-6 shadow-xl"
             role="dialog"
             aria-modal="true"
             aria-labelledby="import-title"
@@ -1252,16 +1439,15 @@ export function Dashboard() {
                 >
                   {templates.map((t) => (
                     <option key={t.id} value={t.slug}>
-                      {t.name} ({t.fileHint})
+                      {t.name.toLowerCase().includes(`(${t.fileHint.toLowerCase()})`) ? t.name : `${t.name} (${t.fileHint})`}
                     </option>
                   ))}
-                  <option value={SENTINELONE_OPTION}>SentinelOne ISPM (API)</option>
                 </select>
               </label>
               {!isSentineloneImport ? (
                 <>
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-[var(--radius-md)] border border-dashed border-[var(--border-strong)] bg-[var(--surface-muted)] px-4 py-2.5 text-sm font-semibold text-[var(--text)] transition hover:border-[var(--accent)] hover:bg-[var(--accent-subtle)]">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+                    <label className="inline-flex min-w-0 flex-1 cursor-pointer items-center justify-center gap-2 rounded-[var(--radius-md)] border border-dashed border-[var(--border-strong)] bg-[var(--surface-muted)] px-4 py-2.5 text-sm font-semibold text-[var(--text)] transition hover:border-[var(--accent)] hover:bg-[var(--accent-subtle)]">
                       <svg className="h-4 w-4 text-[var(--accent)]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m6.713-6.713l3-3" />
                       </svg>
@@ -1271,13 +1457,15 @@ export function Dashboard() {
                         disabled={importBusy || previewBusy || !importSlug}
                         onChange={onImportFileSelected}
                       />
-                      {selectedImportFile ? selectedImportFile.name : "Choisir un fichier"}
+                      <span className="max-w-[13rem] truncate sm:max-w-[15rem]">
+                        {selectedImportFile ? selectedImportFile.name : "Choisir un fichier"}
+                      </span>
                     </label>
                     <button
                       type="button"
                       onClick={() => void previewImportFile()}
                       disabled={!selectedImportFile || !importSlug || previewBusy || importBusy}
-                      className="ui-btn-secondary inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+                      className="ui-btn-secondary inline-flex shrink-0 items-center gap-2 px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {previewBusy ? "Prévisualisation..." : "Prévisualiser"}
                     </button>
@@ -1297,7 +1485,7 @@ export function Dashboard() {
                         document.body.removeChild(a);
                         URL.revokeObjectURL(url);
                       }}
-                      className="ui-btn-secondary inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold"
+                      className="ui-btn-secondary inline-flex shrink-0 items-center gap-2 px-3 py-2 text-xs font-semibold"
                     >
                       <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
                         <path

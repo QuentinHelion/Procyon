@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { Severity, VulnSource } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { saveImportedReport } from "@/lib/reports-storage";
 
 type S1Exposure = {
   id?: unknown;
@@ -139,23 +140,49 @@ export async function POST(request: Request) {
   const template = await prisma.scanTemplate.upsert({
     where: { slug: "sentinelone-ispm-api" },
     create: {
-      name: "SentinelOne ISPM (API)",
+      name: "SentinelOne ISPM",
       slug: "sentinelone-ispm-api",
       description: "Import API des expositions SentinelOne ISPM",
       parserId: "generic_csv",
       fileHint: "API",
       isBuiltIn: true,
     },
-    update: {},
+    update: {
+      name: "SentinelOne ISPM",
+      fileHint: "API",
+      isBuiltIn: true,
+    },
   });
 
   const batch = await prisma.importBatch.create({
     data: {
       templateId: template.id,
-      fileName: "sentinelone-ispm-api",
+      fileName: "sentinelone-ispm-exposures.json",
       itemCount: 0,
     },
   });
+
+  try {
+    const archivedPayload = {
+      source: "sentinelone_ispm_api",
+      fetchedAt: new Date().toISOString(),
+      tenantUrl: baseUrl.origin,
+      siteIds: parsedSiteIds,
+      response: payload,
+    };
+    const jsonBuffer = Buffer.from(JSON.stringify(archivedPayload, null, 2), "utf8");
+    const storedPath = await saveImportedReport(
+      batch.id,
+      "sentinelone-ispm-exposures.json",
+      jsonBuffer,
+    );
+    await prisma.importBatch.update({
+      where: { id: batch.id },
+      data: { storedPath },
+    });
+  } catch (e) {
+    console.error("[import][sentinelone-ispm] archivage de la reponse JSON echoue", e);
+  }
 
   const existing = await prisma.vulnerability.findMany({
     where: {
