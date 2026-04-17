@@ -116,18 +116,18 @@ export function MonitoringOverview() {
   const [draggingWidgetId, setDraggingWidgetId] = useState<WidgetId | null>(null);
   const [dragOverWidgetId, setDragOverWidgetId] = useState<WidgetId | null>(null);
 
-  const [trendGranularity, setTrendGranularity] = useState<TrendGranularity>("month");
-  const [trendPreset, setTrendPreset] = useState<TrendPreset>("90d");
+  const [trendGranularity, setTrendGranularity] = useState<TrendGranularity>("week");
+  const [trendPreset, setTrendPreset] = useState<TrendPreset>("30d");
   const [trendStart, setTrendStart] = useState<string>(() => {
     const d = new Date();
-    d.setDate(d.getDate() - 90);
+    d.setDate(d.getDate() - 29);
     return toDateInput(d);
   });
   const [trendEnd, setTrendEnd] = useState<string>(() => toDateInput(new Date()));
   const [trendStatuses, setTrendStatuses] = useState<Record<VulnStatus, boolean>>({
     TODO: true,
     IN_PROGRESS: true,
-    DONE: true,
+    DONE: false,
     ARCHIVE: false,
   });
   const [trendSeverities, setTrendSeverities] = useState<Record<Severity, boolean>>({
@@ -246,10 +246,19 @@ export function MonitoringOverview() {
       const i = bucketIdx.get(key) ?? -1;
       if (i >= 0) base[v.severity][i] += 1;
     }
+    // Convert creations-per-bucket into cumulative stock-over-time.
+    for (const sev of severityOrder) {
+      for (let i = 1; i < base[sev].length; i++) {
+        base[sev][i] += base[sev][i - 1];
+      }
+    }
     return base;
   }, [items, trendBuckets, trendGranularity, trendSeverities, trendStatuses]);
 
-  const trendYMax = useMemo(() => Math.max(5, ...severityOrder.flatMap((s) => trendSeries[s]), 1), [trendSeries]);
+  const trendYMax = useMemo(
+    () => Math.max(5, ...severityOrder.filter((s) => trendSeverities[s]).flatMap((s) => trendSeries[s]), 1),
+    [trendSeries, trendSeverities],
+  );
 
   const deadlineRange = useMemo(() => {
     const start = parseDateInput(deadlineStart) ?? new Date();
@@ -516,7 +525,13 @@ export function MonitoringOverview() {
                       </div>
                     </details>
                   </div>
-                  <TrendChart buckets={trendBuckets} series={trendSeries} yMax={trendYMax} severityLabel={severityLabel} />
+                  <TrendChart
+                    buckets={trendBuckets}
+                    series={trendSeries}
+                    yMax={trendYMax}
+                    severityLabel={severityLabel}
+                    visibleSeverities={trendSeverities}
+                  />
                 </div>
               ) : id === "open_pie" ? (
                 <DonutWidget title={t("Open by Severity", "Ouvertes par criticite")} data={openBySeverity} severityLabel={severityLabel} totalLabel={t("Total", "Total")} />
@@ -717,11 +732,13 @@ function TrendChart({
   series,
   yMax,
   severityLabel,
+  visibleSeverities,
 }: {
   buckets: { key: string; label: string }[];
   series: Record<Severity, number[]>;
   yMax: number;
   severityLabel: Record<Severity, string>;
+  visibleSeverities: Record<Severity, boolean>;
 }) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const width = 920;
@@ -762,7 +779,7 @@ function TrendChart({
             strokeDasharray="3 3"
           />
         ) : null}
-        {severityOrder.map((s) => {
+        {severityOrder.filter((s) => visibleSeverities[s]).map((s) => {
           const pts = series[s].map((v, i) => `${xFor(i)},${yFor(v)}`).join(" ");
           return (
             <g key={s}>
@@ -803,7 +820,7 @@ function TrendChart({
             <text x="10" y="16" fontSize="11" fill="#e2e8f0">
               {buckets[hoverIdx].label}
             </text>
-            {severityOrder.map((s, i) => (
+            {severityOrder.filter((s) => visibleSeverities[s]).map((s, i) => (
               <text key={s} x="10" y={34 + i * 14} fontSize="11" fill={severityColor[s]}>
                 {severityLabel[s]}: {series[s][hoverIdx]}
               </text>
@@ -812,7 +829,7 @@ function TrendChart({
         ) : null}
       </svg>
       <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
-        {severityOrder.map((s) => (
+        {severityOrder.filter((s) => visibleSeverities[s]).map((s) => (
           <span key={s} className="inline-flex items-center gap-1 text-[var(--muted)]">
             <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: severityColor[s] }} />
             {severityLabel[s]}

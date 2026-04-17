@@ -17,15 +17,18 @@ services:
       retries: 5
 
   app:
+    init: true
     build:
       context: .
       dockerfile: Dockerfile
+      target: runner
     restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
       DATABASE_URL: postgresql://procyon:procyon@db:5432/procyon?schema=public
       REPORTS_DIR: /app/data/reports
+      RUN_SEED: "0"
     volumes:
       - procyon_reports:/app/data/reports
     depends_on:

@@ -136,8 +136,14 @@ docker compose up --build
 ```
 
 - **App:** [http://localhost:3000](http://localhost:3000)
-- Migrations and seed run on container startup.
+- Migrations run on container startup (`seed` is disabled by default for faster and safer restarts).
 - Volumes: `procyon_pg` (database), `procyon_reports` (archived files at `REPORTS_DIR=/app/data/reports`).
+
+If you need to force seed once:
+
+```bash
+docker compose run --rm -e RUN_SEED=1 app sh -lc "npx prisma db seed"
+```
 
 ---
 

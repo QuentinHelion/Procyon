@@ -6,3 +6,11 @@ node_modules
 !.env.example
 *.md
 npm-debug.log*
+.cursor
+.vscode
+assets
+data
+coverage
+dist
+tmp
+*.log
