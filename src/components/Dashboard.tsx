@@ -255,7 +255,7 @@ function DashboardDraggableVulnCard({
           ) : null}
           <p className="mt-2.5 text-sm font-semibold leading-snug text-[var(--text)]">{v.title}</p>
           {v.description ? (
-            <p className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-[var(--muted)]">{v.description}</p>
+            <p className="mt-1.5 whitespace-pre-line break-words text-xs leading-relaxed text-[var(--muted)]">{v.description}</p>
           ) : null}
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-[var(--muted)]">
             {v.dueAt ? (
