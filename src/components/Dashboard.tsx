@@ -364,6 +364,29 @@ export function Dashboard() {
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
+  useEffect(() => {
+    if (!addOpen && !editOpen && !importOpen && !deleteConfirmOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (deleteConfirmOpen) {
+        setDeleteConfirmOpen(false);
+        return;
+      }
+      if (importOpen) {
+        setImportOpen(false);
+        return;
+      }
+      if (editOpen) {
+        setEditOpen(false);
+        setEditTarget(null);
+        return;
+      }
+      if (addOpen) setAddOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [addOpen, deleteConfirmOpen, editOpen, importOpen]);
+
   const load = useCallback(async () => {
     setError(null);
     try {

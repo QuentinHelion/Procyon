@@ -35,7 +35,7 @@ Security teams juggle spreadsheets, heavy GRC suites, and one-off exports. **Pro
 | **Kanban operations** | Status columns with drag-and-drop, severity/category filters, sort options, configurable metric cards, and localStorage persistence for view settings. |
 | **Planning** | Efficient monthly calendar + deadlines buckets. Day side panel on click, drag task between days to move due dates, and focused filters. |
 | **Imports** | Unified import modal with preview/confirm workflow. Supports PingCastle XML, generic CSV, and SentinelOne ISPM API with duplicate protection. |
-| **Reports archive** | Successful imports store an archive file under `REPORTS_DIR`; includes uploaded files and raw SentinelOne API JSON payloads. |
+| **Reports archive** | Successful imports store an archive file under `REPORTS_DIR`; includes uploaded files and raw SentinelOne API JSON payloads, with preview/download/delete from UI. |
 | **Internationalization & theme** | Light/dark/system theme and EN/FR locale (browser auto-detection with manual override in settings). |
 
 ---
@@ -202,6 +202,7 @@ REST-style handlers under `src/app/api/`.
 | `POST` | `/api/import/sentinelone-ispm/preview` | Preview SentinelOne ISPM API import (`tenantUrl`, `token`, `siteIds`) |
 | `POST` | `/api/import/sentinelone-ispm` | Confirm SentinelOne ISPM API import |
 | `GET` | `/api/reports` | List import batches + file presence |
+| `DELETE` | `/api/reports/[id]` | Delete an import report entry and its archived file |
 | `GET` | `/api/reports/[id]/file` | Stream archived file (`?download=1` to force download) |
 
 Imports that supply `externalRef` update existing rows when a match is found. Preview endpoints return create/update/skip decisions before confirmation.

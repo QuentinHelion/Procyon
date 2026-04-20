@@ -26,15 +26,15 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={plusJakarta.variable} suppressHydrationWarning>
-      <body className={`${plusJakarta.className} min-h-dvh antialiased`}>
+      <body className={`${plusJakarta.className} min-h-dvh overflow-hidden antialiased`}>
         <Script id="procyon-theme-init" strategy="beforeInteractive">
           {themeInit}
         </Script>
         <ThemeProvider>
           <LocaleProvider>
-            <div className="flex min-h-dvh items-stretch">
+            <div className="flex h-dvh items-stretch">
               <AppSidebar />
-              <main className="min-h-dvh min-w-0 flex-1 overflow-x-hidden">{children}</main>
+              <main className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto">{children}</main>
             </div>
           </LocaleProvider>
         </ThemeProvider>
