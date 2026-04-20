@@ -23,6 +23,7 @@ import {
   type ReactNode,
 } from "react";
 import { useLocale } from "@/components/LocaleProvider";
+import { dateLocaleTag } from "@/lib/ui-i18n";
 
 type Severity = "INFO" | "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 type VulnStatus = "TODO" | "IN_PROGRESS" | "DONE" | "ARCHIVE";
@@ -70,6 +71,38 @@ const WIDGETS: WidgetDef[] = [
   { id: "inprogress_pie", title: "In Progress by Type", description: "Donut of in-progress alerts by severity." },
 ];
 
+function widgetHeading(id: WidgetId, locale: "en" | "fr"): string {
+  if (locale === "fr") {
+    const fr: Record<WidgetId, string> = {
+      kpi_overview: "Indicateurs globaux",
+      deadlines_window: "Échéances à venir",
+      status_breakdown: "Répartition par statut",
+      severity_breakdown: "Répartition par criticité",
+      trend_chart: "Évolution dans le temps",
+      open_pie: "Ouvertes par criticité",
+      inprogress_pie: "En cours par criticité",
+    };
+    return fr[id];
+  }
+  return WIDGETS.find((w) => w.id === id)?.title ?? id;
+}
+
+function widgetDescription(id: WidgetId, locale: "en" | "fr"): string {
+  if (locale === "fr") {
+    const fr: Record<WidgetId, string> = {
+      kpi_overview: "Volume, ouvertes, en cours, critiques.",
+      deadlines_window: "Fenêtre personnalisable en jours ou en mois.",
+      status_breakdown: "Nombre d’alertes par statut.",
+      severity_breakdown: "Nombre d’alertes par criticité.",
+      trend_chart: "Stock ouvert par criticité dans le temps (chronologie des statuts).",
+      open_pie: "Anneau des alertes ouvertes par criticité.",
+      inprogress_pie: "Anneau des alertes en cours par criticité.",
+    };
+    return fr[id];
+  }
+  return WIDGETS.find((w) => w.id === id)?.description ?? "";
+}
+
 const DEFAULT_LAYOUT: WidgetId[] = [
   "kpi_overview",
   "deadlines_window",
@@ -91,7 +124,7 @@ const severityLabelEn: Record<Severity, string> = {
 };
 const severityLabelFr: Record<Severity, string> = {
   CRITICAL: "Critique",
-  HIGH: "Elevee",
+  HIGH: "Élevée",
   MEDIUM: "Moyenne",
   LOW: "Faible",
   INFO: "Info",
@@ -112,10 +145,10 @@ const statusLabelEn: Record<VulnStatus, string> = {
   ARCHIVE: "Acknowledged",
 };
 const statusLabelFr: Record<VulnStatus, string> = {
-  TODO: "A traiter",
+  TODO: "À traiter",
   IN_PROGRESS: "En cours",
-  DONE: "Terminees",
-  ARCHIVE: "Acquittees",
+  DONE: "Terminées",
+  ARCHIVE: "Acquittées",
 };
 
 async function parseJson<T>(res: Response): Promise<T> {
@@ -461,7 +494,7 @@ export function MonitoringOverview() {
         <Kpi title={t("Total", "Total")} value={items.length} />
         <Kpi title={t("Open", "Ouvertes")} value={openItems.length} accent />
         <Kpi title={t("In Progress", "En cours")} value={statusCounts.IN_PROGRESS} />
-        <Kpi title={t("Acknowledged", "Acquittees")} value={statusCounts.ARCHIVE} />
+        <Kpi title={t("Acknowledged", "Acquittées")} value={statusCounts.ARCHIVE} />
       </div>
     ) : id === "deadlines_window" ? (
       <DeadlineWindowWidget
@@ -473,9 +506,10 @@ export function MonitoringOverview() {
         onChangeUnit={setDeadlineUnit}
         onChangeAmount={(n) => setDeadlineAmount(Math.max(1, Math.min(36, n)))}
         onShift={shiftDeadlineWindow}
-        rangeLabel={`${deadlineRange.start.toLocaleDateString(locale === "fr" ? "fr-FR" : "en-US")} - ${deadlineRange.end.toLocaleDateString(locale === "fr" ? "fr-FR" : "en-US")}`}
+        rangeLabel={`${deadlineRange.start.toLocaleDateString(dateLocaleTag(locale))} - ${deadlineRange.end.toLocaleDateString(dateLocaleTag(locale))}`}
         items={deadlinesWindowItems}
         severityLabel={severityLabel}
+        dateLocale={dateLocaleTag(locale)}
       />
     ) : id === "status_breakdown" ? (
       <div className="space-y-2">
@@ -493,13 +527,13 @@ export function MonitoringOverview() {
       <div>
         <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
           <label className="text-[var(--muted)]">
-            {t("Period", "Periode")}:
+            {t("Period", "Période")}:
             <select value={trendPreset} onChange={(e) => setTrendPreset(e.target.value as TrendPreset)} className="ui-input ml-2 px-2 py-1 text-xs">
               <option value="7d">7 {t("days", "jours")}</option>
               <option value="30d">30 {t("days", "jours")}</option>
               <option value="90d">90 {t("days", "jours")}</option>
               <option value="365d">365 {t("days", "jours")}</option>
-              <option value="custom">{t("Custom", "Personnalisee")}</option>
+              <option value="custom">{t("Custom", "Personnalisée")}</option>
             </select>
           </label>
           {trendPreset === "custom" ? (
@@ -515,7 +549,7 @@ export function MonitoringOverview() {
             </div>
           ) : null}
           <label className="text-[var(--muted)]">
-            {t("Granularity", "Granularite")}:
+            {t("Granularity", "Granularité")}:
             <select value={trendGranularity} onChange={(e) => setTrendGranularity(e.target.value as TrendGranularity)} className="ui-input ml-2 px-2 py-1 text-xs">
               <option value="day">{t("Day", "Jour")}</option>
               <option value="week">{t("Week", "Semaine")}</option>
@@ -530,7 +564,7 @@ export function MonitoringOverview() {
               <p className="mb-2 text-[10px] leading-snug text-[var(--muted)]">
                 {t(
                   "Count vulnerabilities in each status at the end of each period (timeline replay).",
-                  "Compte les fiches dans chaque statut en fin de periode (rejoue la chronologie).",
+                  "Compte les fiches dans chaque statut en fin de période (rejoue la chronologie).",
                 )}
               </p>
               {(Object.keys(statusLabel) as VulnStatus[]).map((s) => (
@@ -542,7 +576,7 @@ export function MonitoringOverview() {
             </div>
           </details>
           <details className="relative">
-            <summary className="ui-btn-secondary list-none cursor-pointer px-2.5 py-1 text-xs">{t("Severities", "Criticites")}</summary>
+            <summary className="ui-btn-secondary list-none cursor-pointer px-2.5 py-1 text-xs">{t("Severities", "Criticités")}</summary>
             <div className="absolute z-20 mt-1 w-48 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-2 shadow-xl">
               {severityOrder.map((s) => (
                 <label key={s} className="flex items-center gap-2 text-xs text-[var(--muted)]">
@@ -571,14 +605,14 @@ export function MonitoringOverview() {
         <p className="mt-2 text-[10px] leading-snug text-[var(--muted)]">
           {t(
             "Based on creation and status-change history (not simple creation dates).",
-            "Base sur l’historique des créations et changements de statut (pas seulement la date de création).",
+            "Basé sur l’historique des créations et changements de statut (pas seulement la date de création).",
           )}
         </p>
       </div>
     ) : id === "open_pie" ? (
-      <DonutWidget title={t("Open by Severity", "Ouvertes par criticite")} data={openBySeverity} severityLabel={severityLabel} totalLabel={t("Total", "Total")} />
+      <DonutWidget title={t("Open by Severity", "Ouvertes par criticité")} data={openBySeverity} severityLabel={severityLabel} totalLabel={t("Total", "Total")} />
     ) : (
-      <DonutWidget title={t("In Progress by Severity", "En cours par criticite")} data={inProgressBySeverity} severityLabel={severityLabel} totalLabel={t("Total", "Total")} />
+      <DonutWidget title={t("In Progress by Severity", "En cours par criticité")} data={inProgressBySeverity} severityLabel={severityLabel} totalLabel={t("Total", "Total")} />
     );
 
   const dashboardGridClass = "grid grid-cols-1 gap-4 lg:grid-cols-12";
@@ -591,12 +625,12 @@ export function MonitoringOverview() {
             {t("Main View", "Vue principale")}
           </p>
           <h1 className="mt-1 text-2xl font-bold tracking-tight text-[var(--text)] sm:text-3xl">
-            {t("Vulnerability Monitoring", "Monitoring des vulnerabilites")}
+            {t("Vulnerability Monitoring", "Suivi des vulnérabilités")}
           </h1>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={() => void loadData()} className="ui-btn-secondary px-4 py-2 text-xs font-semibold">
-            {t("Refresh data", "Actualiser les donnees")}
+            {t("Refresh data", "Actualiser les données")}
           </button>
           {editMode ? (
             <button
@@ -614,7 +648,7 @@ export function MonitoringOverview() {
               }}
               className="ui-btn-secondary px-4 py-2 text-xs font-semibold"
             >
-              {t("Reset layout", "Reinitialiser la vue")}
+              {t("Reset layout", "Réinitialiser la vue")}
             </button>
           ) : null}
           <button type="button" onClick={() => setEditMode((v) => !v)} className="ui-btn-secondary px-4 py-2 text-xs font-semibold">
@@ -626,23 +660,22 @@ export function MonitoringOverview() {
       {editMode ? (
         <section className="ui-card mb-6 p-4">
           <p className="text-xs font-semibold text-[var(--muted)]">
-            {t("Show/hide and reorder widgets", "Afficher / masquer et reorganiser les widgets")}
+            {t("Show/hide and reorder widgets", "Afficher / masquer et réorganiser les widgets")}
           </p>
           <p className="mt-1 text-[11px] leading-snug text-[var(--muted)]">
             {t(
               "Drag the grip on each widget to move it smoothly on the grid.",
-              "Glissez la poignee sur chaque widget pour le deplacer fluidement sur la grille.",
+              "Glissez la poignée sur chaque widget pour le déplacer fluidement sur la grille.",
             )}
           </p>
           <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
             {layout.map((id) => {
-              const meta = WIDGETS.find((w) => w.id === id)!;
               const hiddenNow = hidden.includes(id);
               return (
                 <div key={id} className="flex items-center justify-between rounded border border-[var(--border)] px-3 py-2">
                   <div className="min-w-0">
-                    <p className="truncate text-xs font-semibold text-[var(--text)]">{meta.title}</p>
-                    <p className="truncate text-[11px] text-[var(--muted)]">{meta.description}</p>
+                    <p className="truncate text-xs font-semibold text-[var(--text)]">{widgetHeading(id, locale)}</p>
+                    <p className="truncate text-[11px] text-[var(--muted)]">{widgetDescription(id, locale)}</p>
                   </div>
                   <div className="ml-2 flex items-center gap-1.5">
                     <button type="button" onClick={() => moveWidget(id, -1)} className="ui-btn-secondary px-2 py-1 text-[10px]">
@@ -667,7 +700,7 @@ export function MonitoringOverview() {
           {error}
         </p>
       ) : null}
-      {loading ? <p className="text-sm text-[var(--muted)]">{t("Loading...", "Chargement...")}</p> : null}
+      {loading ? <p className="text-sm text-[var(--muted)]">{t("Loading…", "Chargement…")}</p> : null}
 
       {!loading ? (
         editMode ? (
@@ -684,6 +717,8 @@ export function MonitoringOverview() {
                   <SortableWidgetCard
                     key={id}
                     id={id}
+                    locale={locale}
+                    heading={widgetHeading(id, locale)}
                     dragSnapshotSize={dragOverlayWidget === id ? dragOverlaySize : null}
                     canRemove={visibleWidgets.length > 1}
                     removeLabel={t("Remove widget", "Supprimer le widget")}
@@ -706,6 +741,8 @@ export function MonitoringOverview() {
                 >
                   <WidgetShell
                     id={dragOverlayWidget}
+                    heading={widgetHeading(dragOverlayWidget, locale)}
+                    locale={locale}
                     fillGridCell
                     showControls={false}
                     canRemove={false}
@@ -719,6 +756,8 @@ export function MonitoringOverview() {
                 <div className="min-w-[280px] max-w-[min(100vw-24px,1400px)] cursor-grabbing rounded-[var(--radius-lg)] shadow-2xl ring-2 ring-[var(--accent)]/25">
                   <WidgetShell
                     id={dragOverlayWidget}
+                    heading={widgetHeading(dragOverlayWidget, locale)}
+                    locale={locale}
                     fillGridCell
                     showControls={false}
                     canRemove={false}
@@ -737,6 +776,8 @@ export function MonitoringOverview() {
               <WidgetShell
                 key={id}
                 id={id}
+                heading={widgetHeading(id, locale)}
+                locale={locale}
                 canRemove={visibleWidgets.length > 1}
                 removeLabel={t("Remove widget", "Supprimer le widget")}
                 onRemove={() => toggleWidget(id)}
@@ -754,6 +795,8 @@ export function MonitoringOverview() {
 function SortableWidgetCard({
   id,
   children,
+  locale,
+  heading,
   dragSnapshotSize,
   canRemove,
   removeLabel,
@@ -761,6 +804,8 @@ function SortableWidgetCard({
 }: {
   id: WidgetId;
   children: ReactNode;
+  locale: "en" | "fr";
+  heading: string;
   /** Taille mesurée au pointerdown : garde la cellule stable quand l’overlay prend le rendu visuel. */
   dragSnapshotSize: { width: number; height: number } | null;
   canRemove: boolean;
@@ -793,6 +838,8 @@ function SortableWidgetCard({
     >
       <WidgetShell
         id={id}
+        heading={heading}
+        locale={locale}
         fillGridCell
         isDragging={isDragging}
         showControls
@@ -809,6 +856,8 @@ function SortableWidgetCard({
 
 function WidgetShell({
   id,
+  heading,
+  locale = "en",
   children,
   rootRef,
   rootStyle,
@@ -821,6 +870,9 @@ function WidgetShell({
   onRemove,
 }: {
   id: WidgetId;
+  /** Titre affiché (libellé localisé). */
+  heading: string;
+  locale?: "en" | "fr";
   children: ReactNode;
   /** Quand le parent (sortable) porte déjà `col-span` + transform sur un wrapper. */
   fillGridCell?: boolean;
@@ -834,8 +886,9 @@ function WidgetShell({
   onRemove: () => void;
 }) {
   const wide = id === "trend_chart" || id === "kpi_overview" || id === "deadlines_window";
-  const title = WIDGETS.find((w) => w.id === id)?.title ?? id;
   const showHandle = Boolean(dragHandleProps);
+  const reorderHint =
+    locale === "fr" ? `${heading} — glisser pour réorganiser` : `${heading} — drag to reorder`;
   const spanClass = fillGridCell ? "" : wide ? "lg:col-span-12" : "lg:col-span-6 xl:col-span-4";
   const widthClass = fillGridCell ? "w-full min-w-0 max-w-full" : "";
 
@@ -848,7 +901,7 @@ function WidgetShell({
       }`}
     >
       <div className="flex items-start justify-between gap-2">
-        <h2 className="text-sm font-semibold text-[var(--text)]">{title}</h2>
+        <h2 className="text-sm font-semibold text-[var(--text)]">{heading}</h2>
         {showControls ? (
           <div className="flex items-center gap-1.5">
             <button
@@ -867,8 +920,8 @@ function WidgetShell({
               <button
                 type="button"
                 className="inline-flex h-7 w-7 cursor-grab touch-none items-center justify-center rounded border border-[var(--border)] bg-[var(--surface-muted)] text-[var(--muted)] hover:bg-[var(--column)]/40 active:cursor-grabbing"
-                aria-label={`${title} — reorder`}
-                title={`${title} — reorder`}
+                aria-label={reorderHint}
+                title={reorderHint}
                 {...dragHandleProps}
               >
                 <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
@@ -901,6 +954,7 @@ function DeadlineWindowWidget({
   rangeLabel,
   items,
   severityLabel,
+  dateLocale,
 }: {
   t: (en: string, fr: string) => string;
   deadlineStart: string;
@@ -913,6 +967,7 @@ function DeadlineWindowWidget({
   rangeLabel: string;
   items: Array<Vuln & { dueDate: Date }>;
   severityLabel: Record<Severity, string>;
+  dateLocale: string;
 }) {
   return (
     <div>
@@ -924,11 +979,11 @@ function DeadlineWindowWidget({
           ▶
         </button>
         <label className="text-[var(--muted)]">
-          {t("Start", "Debut")}:
+          {t("Start", "Début")}:
           <input type="date" value={deadlineStart} onChange={(e) => onChangeStart(e.target.value)} className="ui-input ml-2 px-2 py-1 text-xs" />
         </label>
         <label className="text-[var(--muted)]">
-          {t("Window", "Fenetre")}:
+          {t("Window", "Fenêtre")}:
           <input
             type="number"
             min={1}
@@ -945,7 +1000,7 @@ function DeadlineWindowWidget({
         <span className="rounded-full bg-[var(--surface-muted)] px-2 py-1 text-[11px] text-[var(--muted)]">{rangeLabel}</span>
       </div>
       {items.length === 0 ? (
-        <p className="text-xs text-[var(--muted)]">{t("No upcoming deadline in this window.", "Aucune echeance dans cette fenetre.")}</p>
+        <p className="text-xs text-[var(--muted)]">{t("No upcoming deadline in this window.", "Aucune échéance dans cette fenêtre.")}</p>
       ) : (
         <ul className="space-y-2">
           {items.slice(0, 14).map((v) => (
@@ -955,11 +1010,15 @@ function DeadlineWindowWidget({
                 <p className="text-[11px] text-[var(--muted)]">{severityLabel[v.severity]}</p>
               </div>
               <span className="ml-2 shrink-0 rounded-full bg-[var(--surface)] px-2 py-0.5 font-semibold text-[var(--text)]">
-                {v.dueDate.toLocaleDateString()}
+                {v.dueDate.toLocaleDateString(dateLocale, { day: "numeric", month: "short" })}
               </span>
             </li>
           ))}
-          {items.length > 14 ? <li className="text-[11px] text-[var(--muted)]">+{items.length - 14}...</li> : null}
+          {items.length > 14 ? (
+            <li className="text-[11px] text-[var(--muted)]">
+              {t(`+${items.length - 14} more`, `+${items.length - 14} autres…`)}
+            </li>
+          ) : null}
         </ul>
       )}
     </div>

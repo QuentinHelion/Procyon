@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { useLocale } from "@/components/LocaleProvider";
+import { dateLocaleTag, uiT } from "@/lib/ui-i18n";
 import { toLocalDateKey } from "@/lib/planning-buckets";
 
 export type PlanningVuln = {
@@ -13,21 +15,23 @@ export type PlanningVuln = {
   acknowledgedAt: string | null;
 };
 
-const severityLabel: Record<PlanningVuln["severity"], string> = {
-  CRITICAL: "Critique",
-  HIGH: "Élevée",
-  MEDIUM: "Moyenne",
-  LOW: "Faible",
-  INFO: "Info",
-};
+function severityLabel(sev: PlanningVuln["severity"], locale: "en" | "fr"): string {
+  const map: Record<PlanningVuln["severity"], [string, string]> = {
+    CRITICAL: ["Critical", "Critique"],
+    HIGH: ["High", "Élevée"],
+    MEDIUM: ["Medium", "Moyenne"],
+    LOW: ["Low", "Faible"],
+    INFO: ["Info", "Info"],
+  };
+  return uiT(locale, ...map[sev]);
+}
 
-const severityClass: Record<PlanningVuln["severity"], string> = {
-  CRITICAL: "bg-red-600/15 text-red-700 dark:text-red-300",
-  HIGH: "bg-orange-500/15 text-orange-800 dark:text-orange-200",
-  MEDIUM: "bg-amber-500/15 text-amber-900 dark:text-amber-100",
-  LOW: "bg-sky-500/15 text-sky-900 dark:text-sky-100",
-  INFO: "bg-zinc-500/10 text-[var(--muted)]",
-};
+function statusChipText(status: PlanningVuln["status"], locale: "en" | "fr"): string {
+  if (status === "ARCHIVE") return uiT(locale, "ARCHIVED", "ARCHIVÉE");
+  if (status === "IN_PROGRESS") return uiT(locale, "IN PROGRESS", "EN COURS");
+  if (status === "DONE") return uiT(locale, "DONE", "TERMINÉE");
+  return uiT(locale, "TODO", "À TRAITER");
+}
 
 function toDateInputValue(iso: string | null): string {
   if (!iso) return "";
@@ -44,6 +48,14 @@ type Props = {
   onPatchAck: (id: string, acknowledged: boolean) => void;
 };
 
+const severityClass: Record<PlanningVuln["severity"], string> = {
+  CRITICAL: "bg-red-600/15 text-red-700 dark:text-red-300",
+  HIGH: "bg-orange-500/15 text-orange-800 dark:text-orange-200",
+  MEDIUM: "bg-amber-500/15 text-amber-900 dark:text-amber-100",
+  LOW: "bg-sky-500/15 text-sky-900 dark:text-sky-100",
+  INFO: "bg-zinc-500/10 text-[var(--muted)]",
+};
+
 export function PlanningTaskCard({
   v,
   compact,
@@ -51,6 +63,9 @@ export function PlanningTaskCard({
   onPatchStatus,
   onPatchAck,
 }: Props) {
+  const { locale } = useLocale();
+  const t = (en: string, fr: string) => uiT(locale, en, fr);
+  const dateLoc = dateLocaleTag(locale);
   const dateVal = toDateInputValue(v.dueAt);
   const unacked = v.status !== "DONE" && v.status !== "ARCHIVE" && !v.acknowledgedAt;
 
@@ -66,17 +81,17 @@ export function PlanningTaskCard({
             <span
               className={`inline-flex rounded px-2 py-0.5 text-[10px] font-semibold uppercase ${severityClass[v.severity]}`}
             >
-              {severityLabel[v.severity]}
+              {severityLabel(v.severity, locale)}
             </span>
-            <span className="text-[10px] text-[var(--muted)]">{v.status === "ARCHIVE" ? "ARCHIVÉE" : v.status.replace("_", " ")}</span>
+            <span className="text-[10px] text-[var(--muted)]">{statusChipText(v.status, locale)}</span>
             {unacked ? (
               <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase text-amber-800 dark:text-amber-200">
-                Non acquittée
+                {t("Not acknowledged", "Non acquittée")}
               </span>
             ) : v.acknowledgedAt ? (
               <span className="text-[9px] text-[var(--muted)]">
-                Acquittée{" "}
-                {new Date(v.acknowledgedAt).toLocaleDateString("fr-FR", {
+                {t("Acknowledged", "Acquittée")}{" "}
+                {new Date(v.acknowledgedAt).toLocaleDateString(dateLoc, {
                   day: "numeric",
                   month: "short",
                 })}
@@ -93,7 +108,7 @@ export function PlanningTaskCard({
         <div className="flex flex-col items-stretch gap-1 sm:items-end">
           {!compact ? (
             <label className="flex items-center gap-2 text-[10px] text-[var(--muted)]">
-              Échéance
+              {t("Due date", "Échéance")}
               <input
                 type="date"
                 value={dateVal}
@@ -104,7 +119,7 @@ export function PlanningTaskCard({
           ) : (
             <span className="text-[10px] text-[var(--muted)]">
               {v.dueAt
-                ? new Date(v.dueAt).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })
+                ? new Date(v.dueAt).toLocaleDateString(dateLoc, { day: "numeric", month: "short" })
                 : "—"}
             </span>
           )}
@@ -116,7 +131,7 @@ export function PlanningTaskCard({
                   onClick={() => onPatchAck(v.id, false)}
                   className="rounded border border-[var(--border)] px-2 py-0.5 text-[10px] hover:bg-[var(--column)]"
                 >
-                  Révoquer acquittement
+                  {t("Revoke acknowledgment", "Révoquer l’acquittement")}
                 </button>
               ) : (
                 <button
@@ -124,7 +139,7 @@ export function PlanningTaskCard({
                   onClick={() => onPatchAck(v.id, true)}
                   className="rounded border border-amber-600/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-900 dark:text-amber-100"
                 >
-                  Acquitter
+                  {t("Acknowledge", "Acquitter")}
                 </button>
               )
             ) : null}
@@ -134,7 +149,7 @@ export function PlanningTaskCard({
                 onClick={() => onPatchStatus(v.id, "IN_PROGRESS")}
                 className="rounded border border-[var(--border)] px-2 py-0.5 text-[10px] hover:bg-[var(--column)]"
               >
-                En cours
+                {t("In progress", "En cours")}
               </button>
             ) : null}
             {v.status !== "DONE" && v.status !== "ARCHIVE" ? (
@@ -143,7 +158,7 @@ export function PlanningTaskCard({
                 onClick={() => onPatchStatus(v.id, "DONE")}
                 className="rounded border border-[var(--border)] px-2 py-0.5 text-[10px] hover:bg-[var(--column)]"
               >
-                Terminer
+                {t("Complete", "Terminer")}
               </button>
             ) : v.status === "ARCHIVE" ? (
               <button
@@ -151,7 +166,7 @@ export function PlanningTaskCard({
                 onClick={() => onPatchStatus(v.id, "TODO")}
                 className="rounded border border-[var(--border)] px-2 py-0.5 text-[10px] hover:bg-[var(--column)]"
               >
-                Réactiver
+                {t("Reactivate", "Réactiver")}
               </button>
             ) : (
               <button
@@ -159,14 +174,14 @@ export function PlanningTaskCard({
                 onClick={() => onPatchStatus(v.id, "TODO")}
                 className="rounded border border-[var(--border)] px-2 py-0.5 text-[10px] hover:bg-[var(--column)]"
               >
-                Rouvrir
+                {t("Reopen", "Rouvrir")}
               </button>
             )}
             <Link
               href="/"
               className="rounded border border-transparent px-2 py-0.5 text-[10px] text-[var(--accent)] hover:underline"
             >
-              Tableau
+              {t("Board", "Tableau")}
             </Link>
           </div>
         </div>

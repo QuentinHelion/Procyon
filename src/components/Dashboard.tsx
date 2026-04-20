@@ -11,6 +11,8 @@ import {
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useLocale } from "@/components/LocaleProvider";
+import { dateLocaleTag, uiT } from "@/lib/ui-i18n";
 
 type Severity = "INFO" | "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 type VulnStatus = "TODO" | "IN_PROGRESS" | "DONE" | "ARCHIVE";
@@ -44,13 +46,6 @@ type Vuln = {
   };
 };
 
-const COLUMNS: { status: VulnStatus; label: string; hint: string }[] = [
-  { status: "TODO", label: "À traiter", hint: "Comme la liste « Planifié » dans To Do" },
-  { status: "IN_PROGRESS", label: "En cours", hint: "Analyse ou remédiation en cours" },
-  { status: "DONE", label: "Terminé", hint: "Clos ou accepté" },
-  { status: "ARCHIVE", label: "Acquitté", hint: "Alertes acquittées et inactives" },
-];
-
 const SEVERITY_ORDER: Severity[] = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"];
 const KANBAN_VISIBLE_COLUMNS_KEY = "procyon-kanban-visible-columns";
 const KANBAN_COLUMN_FILTERS_KEY = "procyon-kanban-column-filters";
@@ -69,20 +64,68 @@ type ImportPreviewItem = {
 type VulnCategory = "MANUAL" | "PINGCASTLE" | "GENERIC_CSV" | "SENTINELONE_ISPM" | "OTHER";
 type KanbanSort = "severity_desc" | "severity_asc" | "created_desc" | "created_asc" | "due_asc" | "due_desc";
 
+function kanbanColumns(locale: "en" | "fr") {
+  const t = (en: string, fr: string) => uiT(locale, en, fr);
+  return [
+    {
+      status: "TODO" as const,
+      label: t("To do", "À traiter"),
+      hint: t(`Like the "Planned" list in To Do`, `Comme la liste « Planifié » dans To Do`),
+    },
+    {
+      status: "IN_PROGRESS" as const,
+      label: t("In progress", "En cours"),
+      hint: t("Investigation or remediation underway.", "Analyse ou remédiation en cours."),
+    },
+    {
+      status: "DONE" as const,
+      label: t("Done", "Terminé"),
+      hint: t("Closed or accepted.", "Clos ou accepté."),
+    },
+    {
+      status: "ARCHIVE" as const,
+      label: t("Acknowledged", "Acquitté"),
+      hint: t("Acknowledged and inactive alerts.", "Alertes acquittées et inactives."),
+    },
+  ];
+}
+
+function severityLabelsFor(locale: "en" | "fr"): Record<Severity, string> {
+  const t = (en: string, fr: string) => uiT(locale, en, fr);
+  return {
+    CRITICAL: t("Critical", "Critique"),
+    HIGH: t("High", "Élevée"),
+    MEDIUM: t("Medium", "Moyenne"),
+    LOW: t("Low", "Faible"),
+    INFO: t("Info", "Info"),
+  };
+}
+
+function categoryLabelsFor(locale: "en" | "fr"): Record<VulnCategory, string> {
+  const t = (en: string, fr: string) => uiT(locale, en, fr);
+  return {
+    MANUAL: t("Manual", "Manuel"),
+    PINGCASTLE: "PingCastle",
+    GENERIC_CSV: t("Generic CSV", "CSV générique"),
+    SENTINELONE_ISPM: "SentinelOne ISPM",
+    OTHER: t("Other import", "Autre import"),
+  };
+}
+
+function sourceBadgeFor(v: Vuln, locale: "en" | "fr"): string {
+  const category = vulnCategory(v);
+  const labels = categoryLabelsFor(locale);
+  if (category === "MANUAL") return uiT(locale, "Manual entry", "Saisie manuelle");
+  if (category === "OTHER") return uiT(locale, "Imported scan", "Scan importé");
+  return labels[category];
+}
+
 const severityStyle: Record<Severity, string> = {
   CRITICAL: "bg-red-600/15 text-red-700 dark:text-red-300",
   HIGH: "bg-orange-500/15 text-orange-800 dark:text-orange-200",
   MEDIUM: "bg-amber-500/15 text-amber-900 dark:text-amber-100",
   LOW: "bg-sky-500/15 text-sky-900 dark:text-sky-100",
   INFO: "bg-zinc-500/10 text-[var(--muted)]",
-};
-
-const severityLabel: Record<Severity, string> = {
-  CRITICAL: "Critique",
-  HIGH: "Élevée",
-  MEDIUM: "Moyenne",
-  LOW: "Faible",
-  INFO: "Info",
 };
 
 /** Bordure gauche carte = gravité immédiate */
@@ -144,21 +187,6 @@ function vulnCategory(v: Vuln): VulnCategory {
   return "OTHER";
 }
 
-const CATEGORY_LABEL: Record<VulnCategory, string> = {
-  MANUAL: "Manuel",
-  PINGCASTLE: "PingCastle",
-  GENERIC_CSV: "CSV générique",
-  SENTINELONE_ISPM: "SentinelOne ISPM",
-  OTHER: "Autre import",
-};
-
-function sourceBadgeLabel(v: Vuln): string {
-  const category = vulnCategory(v);
-  if (category === "MANUAL") return "Saisie manuelle";
-  if (category === "OTHER") return "Scan importé";
-  return CATEGORY_LABEL[category];
-}
-
 function sourceBadgeClass(v: Vuln): string {
   const category = vulnCategory(v);
   if (category === "MANUAL") return "bg-[var(--column)] text-[var(--muted)]";
@@ -190,15 +218,32 @@ function KanbanDroppableList({
 
 function DashboardDraggableVulnCard({
   v,
+  locale,
   patchAcknowledge,
   patchStatus,
   onEdit,
 }: {
   v: Vuln;
+  locale: "en" | "fr";
   patchAcknowledge: (id: string, acknowledged: boolean) => Promise<void>;
   patchStatus: (id: string, status: VulnStatus) => Promise<void>;
   onEdit: (v: Vuln) => void;
 }) {
+  const columns = useMemo(() => kanbanColumns(locale), [locale]);
+  const severityLabel = useMemo(() => severityLabelsFor(locale), [locale]);
+  const dateLoc = dateLocaleTag(locale);
+  const cardUi = useMemo(
+    () => ({
+      drag: uiT(locale, "Drag card to another column", "Glisser la carte vers une autre colonne"),
+      edit: uiT(locale, "Edit item", "Modifier la fiche"),
+      ackOn: uiT(locale, "Acknowledged on", "Acquittée le"),
+      reactivate: uiT(locale, "Reactivate alert", "Réactiver l’alerte"),
+      cancelAck: uiT(locale, "Cancel acknowledgment", "Annuler l’acquittement"),
+      status: uiT(locale, "Status", "Statut"),
+    }),
+    [locale],
+  );
+
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: v.id,
     data: { status: v.status },
@@ -217,7 +262,7 @@ function DashboardDraggableVulnCard({
         <button
           type="button"
           className="touch-manipulation shrink-0 cursor-grab border-r border-[var(--border)]/70 bg-[var(--surface-muted)]/60 px-2 pt-3 text-[var(--muted)] hover:bg-[var(--surface-muted)] hover:text-[var(--text)] active:cursor-grabbing"
-          aria-label="Glisser la carte vers une autre colonne"
+          aria-label={cardUi.drag}
           {...listeners}
           {...attributes}
         >
@@ -239,13 +284,13 @@ function DashboardDraggableVulnCard({
             </span>
             <div className="flex items-center gap-1.5">
               <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-medium ${sourceBadgeClass(v)}`}>
-                {sourceBadgeLabel(v)}
+                {sourceBadgeFor(v, locale)}
               </span>
               <button
                 type="button"
                 onClick={() => onEdit(v)}
                 className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface-muted)] text-[var(--muted)] transition hover:border-[var(--accent)] hover:bg-[var(--accent-subtle)] hover:text-[var(--text)]"
-                aria-label="Modifier la fiche"
+                aria-label={cardUi.edit}
               >
                 <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
                   <path
@@ -262,8 +307,8 @@ function DashboardDraggableVulnCard({
               <svg className="h-3.5 w-3.5 text-[var(--accent)]" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              Acquittée le{" "}
-              {new Date(v.acknowledgedAt).toLocaleString("fr-FR", {
+              {cardUi.ackOn}{" "}
+              {new Date(v.acknowledgedAt).toLocaleString(dateLoc, {
                 dateStyle: "short",
                 timeStyle: "short",
               })}
@@ -279,7 +324,7 @@ function DashboardDraggableVulnCard({
                 <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5a2.25 2.25 0 002.25-2.25m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5a2.25 2.25 0 012.25 2.25v7.5" />
                 </svg>
-                {new Date(v.dueAt).toLocaleDateString("fr-FR", {
+                {new Date(v.dueAt).toLocaleDateString(dateLoc, {
                   weekday: "short",
                   day: "numeric",
                   month: "short",
@@ -298,7 +343,7 @@ function DashboardDraggableVulnCard({
                 onClick={() => void patchAcknowledge(v.id, false)}
                 className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-center text-xs font-medium text-[var(--muted)] transition hover:text-[var(--text)]"
               >
-                Réactiver l’alerte
+                {cardUi.reactivate}
               </button>
             ) : v.status !== "DONE" && v.acknowledgedAt ? (
               <button
@@ -306,17 +351,17 @@ function DashboardDraggableVulnCard({
                 onClick={() => void patchAcknowledge(v.id, false)}
                 className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-center text-xs font-medium text-[var(--muted)] transition hover:text-[var(--text)]"
               >
-                Annuler l’acquittement
+                {cardUi.cancelAck}
               </button>
             ) : null}
             <label className="flex items-center gap-2 text-[11px] text-[var(--muted)]">
-              <span className="shrink-0">Statut</span>
+              <span className="shrink-0">{cardUi.status}</span>
               <select
                 value={v.status}
                 onChange={(e) => void patchStatus(v.id, e.target.value as VulnStatus)}
                 className="ui-input min-w-0 flex-1 px-2 py-1.5 text-[11px]"
               >
-                {COLUMNS.map((c) => (
+                {columns.map((c) => (
                   <option key={c.status} value={c.status}>
                     {c.label}
                   </option>
@@ -339,6 +384,12 @@ async function parseJson<T>(res: Response): Promise<T> {
 }
 
 export function Dashboard() {
+  const { locale } = useLocale();
+  const t = useCallback((en: string, fr: string) => uiT(locale, en, fr), [locale]);
+  const columns = useMemo(() => kanbanColumns(locale), [locale]);
+  const severityLabel = useMemo(() => severityLabelsFor(locale), [locale]);
+  const categoryLabel = useMemo(() => categoryLabelsFor(locale), [locale]);
+
   const [vulns, setVulns] = useState<Vuln[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
@@ -406,19 +457,19 @@ export function Dashboard() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [v, t] = await Promise.all([
+      const [v, tpl] = await Promise.all([
         parseJson<Vuln[]>(await fetch("/api/vulnerabilities")),
         parseJson<Template[]>(await fetch("/api/templates")),
       ]);
       setVulns(v);
-      setTemplates(t);
-      setImportSlug((prev) => prev || (t[0]?.slug ?? SENTINELONE_TEMPLATE_SLUG));
+      setTemplates(tpl);
+      setImportSlug((prev) => prev || (tpl[0]?.slug ?? SENTINELONE_TEMPLATE_SLUG));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Erreur de chargement");
+      setError(e instanceof Error ? e.message : t("Load error", "Erreur de chargement"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -426,13 +477,13 @@ export function Dashboard() {
 
   const byStatus = useMemo(() => {
     const m = new Map<VulnStatus, Vuln[]>();
-    for (const c of COLUMNS) m.set(c.status, []);
+    for (const c of columns) m.set(c.status, []);
     for (const v of vulns) {
       const list = m.get(v.status);
       if (list) list.push(v);
     }
     return m;
-  }, [vulns]);
+  }, [vulns, columns]);
 
   const stats = useMemo(() => {
     const open = vulns.filter((v) => v.status !== "DONE" && v.status !== "ARCHIVE");
@@ -659,7 +710,7 @@ export function Dashboard() {
         ? undefined
         : new Date(`${addDue}T12:00:00`).toISOString();
     if (addDue.trim() !== "" && Number.isNaN(new Date(dueIso!).getTime())) {
-      setError("Date d’échéance invalide");
+      setError(t("Invalid due date", "Date d’échéance invalide"));
       return;
     }
     const res = await fetch("/api/vulnerabilities", {
@@ -706,7 +757,7 @@ export function Dashboard() {
     const res = await fetch(`/api/vulnerabilities/${id}`, { method: "DELETE" });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(typeof err.error === "string" ? err.error : "Suppression impossible");
+      throw new Error(typeof err.error === "string" ? err.error : t("Delete failed", "Suppression impossible"));
     }
     setVulns((prev) => prev.filter((x) => x.id !== id));
   }
@@ -721,7 +772,7 @@ export function Dashboard() {
       setEditOpen(false);
       setEditTarget(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Suppression impossible");
+      setError(e instanceof Error ? e.message : t("Delete failed", "Suppression impossible"));
     } finally {
       setDeleteBusy(false);
     }
@@ -745,7 +796,7 @@ export function Dashboard() {
         ? null
         : new Date(`${editDue}T12:00:00`).toISOString();
     if (editDue.trim() !== "" && Number.isNaN(new Date(dueIso!).getTime())) {
-      setError("Date d’échéance invalide");
+      setError(t("Invalid due date", "Date d’échéance invalide"));
       return;
     }
     const payload: Partial<Vuln> & { dueAt?: string | null } = {
@@ -804,10 +855,13 @@ export function Dashboard() {
       setImportPreviewCreateCount(data.createCount);
       setImportPreviewSecondaryCount(data.updateCount + data.skipCount);
       setImportMsg(
-        `Prévisualisation: ${data.createCount} création(s), ${data.updateCount} mise(s) à jour, ${data.skipCount} doublon(s), ${data.total} total.`,
+        t(
+          `Preview: ${data.createCount} new, ${data.updateCount} update(s), ${data.skipCount} duplicate(s), ${data.total} total.`,
+          `Prévisualisation : ${data.createCount} création(s), ${data.updateCount} mise(s) à jour, ${data.skipCount} doublon(s), ${data.total} au total.`,
+        ),
       );
     } catch (err) {
-      setImportMsg(err instanceof Error ? err.message : "Prévisualisation échouée");
+      setImportMsg(err instanceof Error ? err.message : t("Preview failed", "Prévisualisation échouée"));
     } finally {
       setPreviewBusy(false);
     }
@@ -824,7 +878,10 @@ export function Dashboard() {
       const res = await fetch("/api/import", { method: "POST", body: fd });
       const data = await parseJson<{ created: number; updated: number; skipped: number; total: number }>(res);
       setImportMsg(
-        `${data.created} créée(s), ${data.updated} mise(s) à jour, ${data.skipped} doublon(s) ignoré(s) (${data.total} au total).`,
+        t(
+          `${data.created} created, ${data.updated} updated, ${data.skipped} duplicates skipped (${data.total} total).`,
+          `${data.created} créée(s), ${data.updated} mise(s) à jour, ${data.skipped} doublon(s) ignoré(s) (${data.total} au total).`,
+        ),
       );
       setSelectedImportFile(null);
       setImportPreviewKind(null);
@@ -834,7 +891,7 @@ export function Dashboard() {
       setImportPreviewSecondaryCount(0);
       await load();
     } catch (err) {
-      setImportMsg(err instanceof Error ? err.message : "Import échoué");
+      setImportMsg(err instanceof Error ? err.message : t("Import failed", "Import échoué"));
     } finally {
       setImportBusy(false);
     }
@@ -846,7 +903,7 @@ export function Dashboard() {
     const token = s1Token.trim();
     const siteIds = s1SiteIds.trim();
     if (!tenantUrl || !token || !siteIds) {
-      setImportMsg("URL tenant, token et siteIds sont requis.");
+      setImportMsg(t("Tenant URL, token, and site IDs are required.", "URL tenant, token et siteIds sont requis."));
       return;
     }
 
@@ -870,10 +927,13 @@ export function Dashboard() {
       setImportPreviewCreateCount(data.createCount);
       setImportPreviewSecondaryCount(data.skipCount);
       setImportMsg(
-        `Prévisualisation: ${data.createCount} création(s), ${data.skipCount} doublon(s), ${data.total} total.`,
+        t(
+          `Preview: ${data.createCount} new, ${data.skipCount} duplicate(s), ${data.total} total.`,
+          `Prévisualisation : ${data.createCount} création(s), ${data.skipCount} doublon(s), ${data.total} au total.`,
+        ),
       );
     } catch (err) {
-      setImportMsg(err instanceof Error ? err.message : "Prévisualisation SentinelOne échouée");
+      setImportMsg(err instanceof Error ? err.message : t("SentinelOne preview failed", "Prévisualisation SentinelOne échouée"));
     } finally {
       setS1Busy(false);
     }
@@ -884,7 +944,7 @@ export function Dashboard() {
     const token = s1Token.trim();
     const siteIds = s1SiteIds.trim();
     if (!tenantUrl || !token || !siteIds) {
-      setImportMsg("URL tenant, token et siteIds sont requis.");
+      setImportMsg(t("Tenant URL, token, and site IDs are required.", "URL tenant, token et siteIds sont requis."));
       return;
     }
     setS1Busy(true);
@@ -897,7 +957,10 @@ export function Dashboard() {
       });
       const data = await parseJson<{ created: number; skipped: number; total: number }>(res);
       setImportMsg(
-        `${data.created} créée(s), ${data.skipped} ignorée(s) (doublons), ${data.total} alerte(s) traitée(s).`,
+        t(
+          `${data.created} created, ${data.skipped} skipped (duplicates), ${data.total} alert(s) processed.`,
+          `${data.created} créée(s), ${data.skipped} ignorée(s) (doublons), ${data.total} alerte(s) traitée(s).`,
+        ),
       );
       setImportPreviewKind(null);
       setImportPreviewItems([]);
@@ -909,7 +972,7 @@ export function Dashboard() {
       setS1SiteIds("");
       await load();
     } catch (err) {
-      setImportMsg(err instanceof Error ? err.message : "Import SentinelOne échoué");
+      setImportMsg(err instanceof Error ? err.message : t("SentinelOne import failed", "Import SentinelOne échoué"));
     } finally {
       setS1Busy(false);
     }
@@ -920,10 +983,10 @@ export function Dashboard() {
       <header className="mb-8 flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--accent)]">
-            Vue opérationnelle
+            {t("Operational view", "Vue opérationnelle")}
           </p>
           <h1 className="mt-1 text-2xl font-bold tracking-tight text-[var(--text)] sm:text-3xl">
-            Tableau de bord
+            {t("Dashboard", "Tableau de bord")}
           </h1>
         </div>
         <div className="relative flex shrink-0 flex-wrap items-start gap-2">
@@ -935,7 +998,7 @@ export function Dashboard() {
             <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
             </svg>
-            Ajouter une tâche
+            {t("Add task", "Ajouter une tâche")}
           </button>
           <button
             type="button"
@@ -945,13 +1008,13 @@ export function Dashboard() {
             <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.9} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 8.25 12 3.75m0 0L7.5 8.25M12 3.75V15" />
             </svg>
-            Importer
+            {t("Import", "Importer")}
           </button>
           <button
             type="button"
             onClick={() => setShowColumnSettings((v) => !v)}
             className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface-muted)] text-[var(--muted)] shadow-sm transition hover:border-[var(--accent)] hover:bg-[var(--accent-subtle)] hover:text-[var(--text)]"
-            aria-label="Paramètres d’affichage des colonnes"
+            aria-label={t("Column display settings", "Paramètres d’affichage des colonnes")}
           >
             <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.7} viewBox="0 0 24 24">
               <path
@@ -965,10 +1028,10 @@ export function Dashboard() {
           {showColumnSettings ? (
             <div className="absolute right-0 top-11 z-20 w-64 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-3 shadow-xl">
               <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
-                Colonnes visibles
+                {t("Visible columns", "Colonnes visibles")}
               </p>
               <div className="mt-2 flex flex-col gap-1.5">
-                {COLUMNS.map((c) => (
+                {columns.map((c) => (
                   <label
                     key={c.status}
                     className="inline-flex cursor-pointer items-center gap-2 text-[11px] text-[var(--muted)]"
@@ -985,10 +1048,10 @@ export function Dashboard() {
               </div>
               <div className="mt-3 border-t border-[var(--border)] pt-2">
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
-                  Catégories visibles
+                  {t("Visible categories", "Catégories visibles")}
                 </p>
                 <div className="mt-2 flex flex-col gap-1.5">
-                  {(Object.keys(CATEGORY_LABEL) as VulnCategory[]).map((category) => (
+                  {(Object.keys(categoryLabel) as VulnCategory[]).map((category) => (
                     <label
                       key={category}
                       className="inline-flex cursor-pointer items-center gap-2 text-[11px] text-[var(--muted)]"
@@ -999,24 +1062,24 @@ export function Dashboard() {
                         onChange={() => toggleCategoryFilter(category)}
                         className="h-3.5 w-3.5 rounded border-[var(--border)]"
                       />
-                      <span>{CATEGORY_LABEL[category]}</span>
+                      <span>{categoryLabel[category]}</span>
                     </label>
                   ))}
                 </div>
               </div>
               <div className="mt-3 border-t border-[var(--border)] pt-2">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">Tri</p>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">{t("Sort", "Tri")}</p>
                 <select
                   value={kanbanSort}
                   onChange={(e) => setKanbanSort(e.target.value as KanbanSort)}
                   className="ui-input mt-1 w-full px-2 py-1.5 text-[11px]"
                 >
-                  <option value="severity_desc">Criticité (haute - basse)</option>
-                  <option value="severity_asc">Criticité (basse - haute)</option>
-                  <option value="created_desc">Date de création (récent - ancien)</option>
-                  <option value="created_asc">Date de création (ancien - récent)</option>
-                  <option value="due_asc">Échéance (proche - lointaine)</option>
-                  <option value="due_desc">Échéance (lointaine - proche)</option>
+                  <option value="severity_desc">{t("Severity (high → low)", "Criticité (haute → basse)")}</option>
+                  <option value="severity_asc">{t("Severity (low → high)", "Criticité (basse → haute)")}</option>
+                  <option value="created_desc">{t("Created (newest first)", "Date de création (récent → ancien)")}</option>
+                  <option value="created_asc">{t("Created (oldest first)", "Date de création (ancien → récent)")}</option>
+                  <option value="due_asc">{t("Due date (soonest first)", "Échéance (proche → lointaine)")}</option>
+                  <option value="due_desc">{t("Due date (latest first)", "Échéance (lointaine → proche)")}</option>
                 </select>
               </div>
             </div>
@@ -1030,8 +1093,8 @@ export function Dashboard() {
             type="button"
             onClick={() => setShowMetricsSettings((v) => !v)}
             className="absolute -top-2 right-0 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface-muted)] text-[var(--muted)] shadow-sm transition hover:border-[var(--accent)] hover:bg-[var(--accent-subtle)] hover:text-[var(--text)]"
-            aria-label="Personnaliser les indicateurs"
-            title="Personnaliser les indicateurs"
+            aria-label={t("Customize metrics", "Personnaliser les indicateurs")}
+            title={t("Customize metrics", "Personnaliser les indicateurs")}
           >
             <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.7} viewBox="0 0 24 24">
               <path
@@ -1044,27 +1107,29 @@ export function Dashboard() {
           </button>
           {showMetricsSettings ? (
             <div className="absolute right-0 top-7 z-20 w-56 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-3 shadow-xl">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">Indicateurs visibles</p>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                {t("Visible metrics", "Indicateurs visibles")}
+              </p>
               <div className="mt-2 flex flex-col gap-1.5">
                 <label className="inline-flex cursor-pointer items-center gap-2 text-[11px] text-[var(--muted)]">
                   <input type="checkbox" checked={visibleMetrics.total} onChange={() => toggleMetricVisibility("total")} className="h-3.5 w-3.5 rounded border-[var(--border)]" />
-                  <span>Total</span>
+                  <span>{t("Total", "Total")}</span>
                 </label>
                 <label className="inline-flex cursor-pointer items-center gap-2 text-[11px] text-[var(--muted)]">
                   <input type="checkbox" checked={visibleMetrics.open} onChange={() => toggleMetricVisibility("open")} className="h-3.5 w-3.5 rounded border-[var(--border)]" />
-                  <span>Ouvertes</span>
+                  <span>{t("Open", "Ouvertes")}</span>
                 </label>
                 <label className="inline-flex cursor-pointer items-center gap-2 text-[11px] text-[var(--muted)]">
                   <input type="checkbox" checked={visibleMetrics.inProgress} onChange={() => toggleMetricVisibility("inProgress")} className="h-3.5 w-3.5 rounded border-[var(--border)]" />
-                  <span>En cours</span>
+                  <span>{t("In progress", "En cours")}</span>
                 </label>
                 <label className="inline-flex cursor-pointer items-center gap-2 text-[11px] text-[var(--muted)]">
                   <input type="checkbox" checked={visibleMetrics.criticalOpen} onChange={() => toggleMetricVisibility("criticalOpen")} className="h-3.5 w-3.5 rounded border-[var(--border)]" />
-                  <span>Critiques ouvertes</span>
+                  <span>{t("Open critical", "Critiques ouvertes")}</span>
                 </label>
                 <label className="inline-flex cursor-pointer items-center gap-2 text-[11px] text-[var(--muted)]">
                   <input type="checkbox" checked={visibleMetrics.acknowledged} onChange={() => toggleMetricVisibility("acknowledged")} className="h-3.5 w-3.5 rounded border-[var(--border)]" />
-                  <span>Acquittées</span>
+                  <span>{t("Acknowledged", "Acquittées")}</span>
                 </label>
               </div>
             </div>
@@ -1072,20 +1137,20 @@ export function Dashboard() {
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {visibleMetrics.total ? (
               <div className="ui-card flex flex-col justify-center px-4 py-3.5">
-                <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">Total</p>
+                <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">{t("Total", "Total")}</p>
                 <p className="mt-0.5 text-2xl font-bold tabular-nums text-[var(--text)]">{stats.total}</p>
               </div>
             ) : null}
             {visibleMetrics.open ? (
               <div className="ui-card flex flex-col justify-center px-4 py-3.5">
-                <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">Ouvertes</p>
+                <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">{t("Open", "Ouvertes")}</p>
                 <p className="mt-0.5 text-2xl font-bold tabular-nums text-[var(--accent)]">{stats.open}</p>
               </div>
             ) : null}
             {visibleMetrics.inProgress ? (
               <div className="ui-card flex flex-col justify-center border-sky-500/20 bg-sky-500/[0.06] px-4 py-3.5 dark:bg-sky-500/10">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-sky-800 dark:text-sky-200/90">
-                  En cours
+                  {t("In progress", "En cours")}
                 </p>
                 <p className="mt-0.5 text-2xl font-bold tabular-nums text-sky-900 dark:text-sky-100">
                   {stats.inProgress}
@@ -1095,7 +1160,7 @@ export function Dashboard() {
             {visibleMetrics.criticalOpen ? (
               <div className="ui-card flex flex-col justify-center border-red-500/15 bg-red-500/[0.04] px-4 py-3.5 dark:bg-red-500/10">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-red-800/90 dark:text-red-200/80">
-                  Critiques ouvertes
+                  {t("Open critical", "Critiques ouvertes")}
                 </p>
                 <p className="mt-0.5 text-2xl font-bold tabular-nums text-red-700 dark:text-red-300">
                   {stats.criticalOpen}
@@ -1104,7 +1169,7 @@ export function Dashboard() {
             ) : null}
             {visibleMetrics.acknowledged ? (
               <div className="ui-card flex flex-col justify-center px-4 py-3.5">
-                <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">Acquittées</p>
+                <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">{t("Acknowledged", "Acquittées")}</p>
                 <p className="mt-0.5 text-2xl font-bold tabular-nums text-[var(--text)]">{acknowledgedCount}</p>
               </div>
             ) : null}
@@ -1120,7 +1185,7 @@ export function Dashboard() {
       ) : null}
 
       {loading ? (
-        <p className="text-sm text-[var(--muted)]">Chargement…</p>
+        <p className="text-sm text-[var(--muted)]">{t("Loading…", "Chargement…")}</p>
       ) : (
         <DndContext
           sensors={sensors}
@@ -1143,11 +1208,11 @@ export function Dashboard() {
             style={{
               gridTemplateColumns: `repeat(${Math.max(
                 1,
-                COLUMNS.filter((col) => visibleStatuses[col.status]).length,
+                columns.filter((col) => visibleStatuses[col.status]).length,
               )}, minmax(0, 1fr))`,
             }}
           >
-            {COLUMNS.filter((col) => visibleStatuses[col.status]).map((col) => {
+            {columns.filter((col) => visibleStatuses[col.status]).map((col) => {
               const filteredColumnItems = (byStatus.get(col.status) ?? [])
                 .filter((v) => columnSeverityFilters[col.status][v.severity])
                 .filter((v) => categoryFilters[vulnCategory(v)])
@@ -1167,10 +1232,12 @@ export function Dashboard() {
                         <h2 className="text-sm font-bold text-[var(--text)]">{col.label}</h2>
                         <details className="relative mt-1">
                           <summary className="inline-flex list-none cursor-pointer items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--surface-muted)] px-2 py-1 text-[10px] font-medium text-[var(--muted)]">
-                            Filtres
+                            {t("Filters", "Filtres")}
                           </summary>
                           <div className="absolute left-0 z-20 mt-1 w-44 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-2 shadow-xl">
-                            <p className="mb-1 text-[10px] uppercase tracking-wide text-[var(--muted)]">Criticités</p>
+                            <p className="mb-1 text-[10px] uppercase tracking-wide text-[var(--muted)]">
+                              {t("Severities", "Criticités")}
+                            </p>
                             <div className="space-y-1.5">
                               {SEVERITY_ORDER.map((sev) => (
                                 <label key={sev} className="flex items-center gap-2 text-[10px] text-[var(--muted)]">
@@ -1197,6 +1264,7 @@ export function Dashboard() {
                       <DashboardDraggableVulnCard
                         key={v.id}
                         v={v}
+                        locale={locale}
                         patchAcknowledge={patchAcknowledge}
                         patchStatus={patchStatus}
                         onEdit={openEdit}
@@ -1234,11 +1302,11 @@ export function Dashboard() {
             aria-labelledby="edit-title"
           >
             <h2 id="edit-title" className="text-lg font-bold text-[var(--text)]">
-              Modifier la vulnérabilité
+              {t("Edit vulnerability", "Modifier la vulnérabilité")}
             </h2>
             <form onSubmit={submitEdit} className="mt-4 flex flex-col gap-3">
               <label className="text-xs font-medium text-[var(--muted)]">
-                Titre
+                {t("Title", "Titre")}
                 <input
                   required
                   value={editTitle}
@@ -1247,7 +1315,7 @@ export function Dashboard() {
                 />
               </label>
               <label className="text-xs font-medium text-[var(--muted)]">
-                Description
+                {t("Description", "Description")}
                 <textarea
                   value={editDesc}
                   onChange={(e) => setEditDesc(e.target.value)}
@@ -1256,7 +1324,7 @@ export function Dashboard() {
                 />
               </label>
               <label className="text-xs font-medium text-[var(--muted)]">
-                Sévérité
+                {t("Severity", "Sévérité")}
                 <select
                   value={editSeverity}
                   onChange={(e) => setEditSeverity(e.target.value as Severity)}
@@ -1270,13 +1338,13 @@ export function Dashboard() {
                 </select>
               </label>
               <label className="text-xs font-medium text-[var(--muted)]">
-                Catégorie
+                {t("Workflow status", "Statut")}
                 <select
                   value={editStatus}
                   onChange={(e) => setEditStatus(e.target.value as VulnStatus)}
                   className="ui-input mt-1 w-full px-3 py-2.5 text-sm"
                 >
-                  {COLUMNS.map((c) => (
+                  {columns.map((c) => (
                     <option key={c.status} value={c.status}>
                       {c.label}
                     </option>
@@ -1284,7 +1352,7 @@ export function Dashboard() {
                 </select>
               </label>
               <label className="text-xs font-medium text-[var(--muted)]">
-                Échéance (optionnel)
+                {t("Due date (optional)", "Échéance (optionnel)")}
                 <input
                   type="date"
                   value={editDue}
@@ -1298,7 +1366,7 @@ export function Dashboard() {
                   onClick={() => setDeleteConfirmOpen(true)}
                   className="mr-auto rounded-lg border border-red-500/35 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-500/15 dark:text-red-300"
                 >
-                  Supprimer
+                  {t("Delete", "Supprimer")}
                 </button>
                 <button
                   type="button"
@@ -1309,10 +1377,10 @@ export function Dashboard() {
                   }}
                   className="ui-btn-secondary px-4 py-2.5 text-sm text-[var(--muted)]"
                 >
-                  Annuler
+                  {t("Cancel", "Annuler")}
                 </button>
                 <button type="submit" className="ui-btn-primary px-5 py-2.5 text-sm shadow-sm">
-                  Enregistrer
+                  {t("Save", "Enregistrer")}
                 </button>
               </div>
             </form>
@@ -1323,10 +1391,14 @@ export function Dashboard() {
         <div className="fixed inset-0 z-[95] flex items-end justify-center bg-black/55 p-4 backdrop-blur-[2px] sm:items-center">
           <div className="ui-card w-full max-w-sm p-5 shadow-xl" role="dialog" aria-modal="true" aria-labelledby="delete-title">
             <h3 id="delete-title" className="text-base font-bold text-[var(--text)]">
-              Confirmer la suppression
+              {t("Confirm deletion", "Confirmer la suppression")}
             </h3>
             <p className="mt-2 text-sm text-[var(--muted)]">
-              Cette action va supprimer définitivement la tâche <span className="font-semibold text-[var(--text)]">&quot;{editTarget.title}&quot;</span>.
+              {t(
+                "This will permanently delete the task ",
+                "Cette action va supprimer définitivement la tâche ",
+              )}
+              <span className="font-semibold text-[var(--text)]">&quot;{editTarget.title}&quot;</span>.
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <button
@@ -1335,7 +1407,7 @@ export function Dashboard() {
                 disabled={deleteBusy}
                 className="ui-btn-secondary px-4 py-2 text-sm text-[var(--muted)] disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Annuler
+                {t("Cancel", "Annuler")}
               </button>
               <button
                 type="button"
@@ -1343,7 +1415,7 @@ export function Dashboard() {
                 disabled={deleteBusy}
                 className="rounded-lg border border-red-500/35 bg-red-500/10 px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-300"
               >
-                {deleteBusy ? "Suppression..." : "Confirmer"}
+                {deleteBusy ? t("Deleting…", "Suppression…") : t("Confirm", "Confirmer")}
               </button>
             </div>
           </div>
@@ -1359,11 +1431,11 @@ export function Dashboard() {
             aria-labelledby="add-title"
           >
             <h2 id="add-title" className="text-lg font-bold text-[var(--text)]">
-              Nouvelle vulnérabilité
+              {t("New vulnerability", "Nouvelle vulnérabilité")}
             </h2>
             <form onSubmit={submitAdd} className="mt-4 flex flex-col gap-3">
               <label className="text-xs font-medium text-[var(--muted)]">
-                Titre
+                {t("Title", "Titre")}
                 <input
                   required
                   value={addTitle}
@@ -1372,7 +1444,7 @@ export function Dashboard() {
                 />
               </label>
               <label className="text-xs font-medium text-[var(--muted)]">
-                Description
+                {t("Description", "Description")}
                 <textarea
                   value={addDesc}
                   onChange={(e) => setAddDesc(e.target.value)}
@@ -1381,7 +1453,7 @@ export function Dashboard() {
                 />
               </label>
               <label className="text-xs font-medium text-[var(--muted)]">
-                Sévérité
+                {t("Severity", "Sévérité")}
                 <select
                   value={addSeverity}
                   onChange={(e) => setAddSeverity(e.target.value as Severity)}
@@ -1395,7 +1467,7 @@ export function Dashboard() {
                 </select>
               </label>
               <label className="text-xs font-medium text-[var(--muted)]">
-                Échéance (optionnel)
+                {t("Due date (optional)", "Échéance (optionnel)")}
                 <input
                   type="date"
                   value={addDue}
@@ -1409,10 +1481,10 @@ export function Dashboard() {
                   onClick={() => setAddOpen(false)}
                   className="ui-btn-secondary px-4 py-2.5 text-sm text-[var(--muted)]"
                 >
-                  Annuler
+                  {t("Cancel", "Annuler")}
                 </button>
                 <button type="submit" className="ui-btn-primary px-5 py-2.5 text-sm shadow-sm">
-                  Créer
+                  {t("Create", "Créer")}
                 </button>
               </div>
             </form>
@@ -1428,11 +1500,11 @@ export function Dashboard() {
             aria-labelledby="import-title"
           >
             <h2 id="import-title" className="text-lg font-bold text-[var(--text)]">
-              Importer un rapport
+              {t("Import a report", "Importer un rapport")}
             </h2>
             <div className="mt-4 flex flex-col gap-3">
               <label className="text-xs font-medium text-[var(--muted)]">
-                Modèle d’import
+                {t("Import template", "Modèle d’import")}
                 <select
                   value={importSlug}
                   onChange={(e) => {
@@ -1447,9 +1519,9 @@ export function Dashboard() {
                   }}
                   className="ui-input mt-1 w-full px-3 py-2.5 text-sm"
                 >
-                  {templates.map((t) => (
-                    <option key={t.id} value={t.slug}>
-                      {t.name.toLowerCase().includes(`(${t.fileHint.toLowerCase()})`) ? t.name : `${t.name} (${t.fileHint})`}
+                  {templates.map((tm) => (
+                    <option key={tm.id} value={tm.slug}>
+                      {tm.name.toLowerCase().includes(`(${tm.fileHint.toLowerCase()})`) ? tm.name : `${tm.name} (${tm.fileHint})`}
                     </option>
                   ))}
                 </select>
@@ -1468,7 +1540,7 @@ export function Dashboard() {
                         onChange={onImportFileSelected}
                       />
                       <span className="max-w-[13rem] truncate sm:max-w-[15rem]">
-                        {selectedImportFile ? selectedImportFile.name : "Choisir un fichier"}
+                        {selectedImportFile ? selectedImportFile.name : t("Choose a file", "Choisir un fichier")}
                       </span>
                     </label>
                     <button
@@ -1477,7 +1549,7 @@ export function Dashboard() {
                       disabled={!selectedImportFile || !importSlug || previewBusy || importBusy}
                       className="ui-btn-secondary inline-flex shrink-0 items-center gap-2 px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {previewBusy ? "Prévisualisation..." : "Prévisualiser"}
+                      {previewBusy ? t("Previewing…", "Prévisualisation…") : t("Preview", "Prévisualiser")}
                     </button>
                     <button
                       type="button"
@@ -1504,7 +1576,7 @@ export function Dashboard() {
                           d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5M12 16.5 7.5 12M12 16.5V3"
                         />
                       </svg>
-                      Télécharger le template
+                      {t("Download template", "Télécharger le modèle")}
                     </button>
                   </div>
                   {importPreviewKind === "file" ? (
@@ -1515,7 +1587,7 @@ export function Dashboard() {
                         disabled={importBusy || !selectedImportFile}
                         className="ui-btn-primary px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        {importBusy ? "Import..." : "Valider l'import fichier"}
+                        {importBusy ? t("Importing…", "Import…") : t("Confirm file import", "Valider l’import fichier")}
                       </button>
                     </div>
                   ) : null}
@@ -1523,14 +1595,14 @@ export function Dashboard() {
               ) : null}
               {isSentineloneImport ? (
                 <form onSubmit={previewSentinelOneIspm} className="mt-2 rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] p-3">
-                <p className="text-xs font-semibold text-[var(--text)]">Import SentinelOne ISPM</p>
+                <p className="text-xs font-semibold text-[var(--text)]">{t("SentinelOne ISPM import", "Import SentinelOne ISPM")}</p>
                 <div className="mt-2 grid gap-2">
                   <input
                     type="url"
                     value={s1TenantUrl}
                     onChange={(e) => setS1TenantUrl(e.target.value)}
                     className="ui-input w-full px-3 py-2 text-xs"
-                    placeholder="URL tenant (ex: https://xxx.sentinelone.net)"
+                    placeholder={t("Tenant URL (e.g. https://xxx.sentinelone.net)", "URL tenant (ex. : https://xxx.sentinelone.net)")}
                     autoComplete="off"
                   />
                   <input
@@ -1538,7 +1610,7 @@ export function Dashboard() {
                     value={s1Token}
                     onChange={(e) => setS1Token(e.target.value)}
                     className="ui-input w-full px-3 py-2 text-xs"
-                    placeholder="API token"
+                    placeholder={t("API token", "Jeton d’API")}
                     autoComplete="off"
                   />
                   <input
@@ -1546,13 +1618,13 @@ export function Dashboard() {
                     value={s1SiteIds}
                     onChange={(e) => setS1SiteIds(e.target.value)}
                     className="ui-input w-full px-3 py-2 text-xs"
-                    placeholder="siteIds (ex: 12345 ou 12345,67890)"
+                    placeholder={t("siteIds (e.g. 12345 or 12345,67890)", "siteIds (ex. : 12345 ou 12345,67890)")}
                     autoComplete="off"
                   />
                 </div>
                 <div className="mt-2 flex justify-end gap-2">
                   <button type="submit" disabled={s1Busy} className="ui-btn-secondary px-3 py-2 text-xs font-semibold">
-                    {s1Busy ? "Prévisualisation..." : "Prévisualiser SentinelOne"}
+                    {s1Busy ? t("Previewing…", "Prévisualisation…") : t("Preview SentinelOne", "Prévisualiser SentinelOne")}
                   </button>
                   {importPreviewKind === "sentinelone" ? (
                     <button
@@ -1561,7 +1633,7 @@ export function Dashboard() {
                       disabled={s1Busy}
                       className="ui-btn-primary px-3 py-2 text-xs font-semibold"
                     >
-                      {s1Busy ? "Import..." : "Valider l'import SentinelOne"}
+                      {s1Busy ? t("Importing…", "Import…") : t("Confirm SentinelOne import", "Valider l’import SentinelOne")}
                     </button>
                   ) : null}
                 </div>
@@ -1570,10 +1642,17 @@ export function Dashboard() {
               {importPreviewKind ? (
                 <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] p-3">
                   <div className="mb-2 flex items-center justify-between text-xs">
-                    <p className="font-semibold text-[var(--text)]">Prévisualisation</p>
+                    <p className="font-semibold text-[var(--text)]">{t("Import preview", "Prévisualisation")}</p>
                     <p className="text-[var(--muted)]">
-                      {importPreviewCreateCount} création(s), {importPreviewSecondaryCount}{" "}
-                      {importPreviewKind === "file" ? "mise(s) à jour" : "doublon(s)"}, {importPreviewTotal} total
+                      {importPreviewKind === "file"
+                        ? t(
+                            `${importPreviewCreateCount} new, ${importPreviewSecondaryCount} updates, ${importPreviewTotal} total`,
+                            `${importPreviewCreateCount} création(s), ${importPreviewSecondaryCount} mise(s) à jour, ${importPreviewTotal} au total`,
+                          )
+                        : t(
+                            `${importPreviewCreateCount} new, ${importPreviewSecondaryCount} duplicates, ${importPreviewTotal} total`,
+                            `${importPreviewCreateCount} création(s), ${importPreviewSecondaryCount} doublon(s), ${importPreviewTotal} au total`,
+                          )}
                     </p>
                   </div>
                   <ul className="max-h-56 space-y-1 overflow-auto">
@@ -1594,7 +1673,11 @@ export function Dashboard() {
                                 : "bg-zinc-500/15 text-[var(--muted)]"
                           }`}
                         >
-                          {item.action === "create" ? "Créer" : item.action === "update" ? "Mettre à jour" : "Ignorer"}
+                          {item.action === "create"
+                            ? t("Create", "Créer")
+                            : item.action === "update"
+                              ? t("Update", "Mettre à jour")
+                              : t("Skip", "Ignorer")}
                         </span>
                       </li>
                     ))}
@@ -1622,7 +1705,7 @@ export function Dashboard() {
                   }}
                   className="ui-btn-secondary px-4 py-2.5 text-sm text-[var(--muted)]"
                 >
-                  Fermer
+                  {t("Close", "Fermer")}
                 </button>
               </div>
             </div>

@@ -18,7 +18,7 @@ export const BUCKET_ORDER: PlanningBucketId[] = [
   "none",
 ];
 
-export const BUCKET_LABEL: Record<PlanningBucketId, string> = {
+const BUCKET_LABEL_FR: Record<PlanningBucketId, string> = {
   overdue: "En retard",
   today: "Aujourd’hui",
   this_week: "Cette semaine",
@@ -27,6 +27,23 @@ export const BUCKET_LABEL: Record<PlanningBucketId, string> = {
   none: "Sans échéance",
   done: "Terminées",
 };
+
+const BUCKET_LABEL_EN: Record<PlanningBucketId, string> = {
+  overdue: "Overdue",
+  today: "Today",
+  this_week: "This week",
+  next_week: "Next week",
+  later: "Later",
+  none: "No due date",
+  done: "Done",
+};
+
+/** @deprecated Préférer `bucketLabel` avec la locale utilisateur. */
+export const BUCKET_LABEL: Record<PlanningBucketId, string> = BUCKET_LABEL_FR;
+
+export function bucketLabel(id: PlanningBucketId, locale: "en" | "fr"): string {
+  return locale === "fr" ? BUCKET_LABEL_FR[id] : BUCKET_LABEL_EN[id];
+}
 
 function startOfDay(d: Date): Date {
   const x = new Date(d);

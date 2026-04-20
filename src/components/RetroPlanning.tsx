@@ -2,13 +2,15 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useLocale } from "@/components/LocaleProvider";
 import {
-  BUCKET_LABEL,
   BUCKET_ORDER,
   bucketForTask,
+  bucketLabel,
   toLocalDateKey,
   type PlanningBucketId,
 } from "@/lib/planning-buckets";
+import { dateLocaleTag, uiT } from "@/lib/ui-i18n";
 import { PlanningTaskCard, type PlanningVuln } from "@/components/PlanningTaskCard";
 
 type VulnStatus = PlanningVuln["status"];
@@ -31,12 +33,31 @@ function fromDateInputToIso(dateStr: string): string | null {
 }
 
 export function RetroPlanning() {
+  const { locale } = useLocale();
+  const t = (en: string, fr: string) => uiT(locale, en, fr);
+  const collatorLocale = locale === "fr" ? "fr" : "en";
   const [items, setItems] = useState<Vuln[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<PlanningView>("calendar");
   const [filterMode, setFilterMode] = useState<"with_done" | "unack_only">("with_done");
   const [calendarMonthOffset, setCalendarMonthOffset] = useState(0);
+
+  const viewOptions = useMemo(() => {
+    const loc = (en: string, fr: string) => uiT(locale, en, fr);
+    return [
+      {
+        id: "calendar" as const,
+        label: loc("Calendar", "Calendrier"),
+        hint: loc("Monthly navigation with a dense, efficient view.", "Navigation mensuelle avec vue dense et efficace."),
+      },
+      {
+        id: "buckets" as const,
+        label: loc("Deadlines", "Échéances"),
+        hint: loc("Overdue, this week, no date, etc.", "Retard, cette semaine, sans date, etc."),
+      },
+    ] satisfies { id: PlanningView; label: string; hint: string }[];
+  }, [locale]);
 
   const load = useCallback(async () => {
     setError(null);
@@ -45,11 +66,11 @@ export function RetroPlanning() {
       const data = await parseJson<Vuln[]>(await fetch("/api/vulnerabilities"));
       setItems(data);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Erreur");
+      setError(e instanceof Error ? e.message : uiT(locale, "Error", "Erreur"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [locale]);
 
   useEffect(() => {
     void load();
@@ -79,13 +100,13 @@ export function RetroPlanning() {
       const aDue = a.dueAt ? new Date(a.dueAt).getTime() : Infinity;
       const bDue = b.dueAt ? new Date(b.dueAt).getTime() : Infinity;
       if (aDue !== bDue) return aDue - bDue;
-      return a.title.localeCompare(b.title, "fr");
+      return a.title.localeCompare(b.title, collatorLocale);
     };
 
     for (const id of BUCKET_ORDER) m.get(id)?.sort(sortByDue);
-    m.get("done")?.sort((a, b) => b.title.localeCompare(a.title, "fr"));
+    m.get("done")?.sort((a, b) => b.title.localeCompare(a.title, collatorLocale));
     return m;
-  }, [visible]);
+  }, [visible, collatorLocale]);
 
   const calendarBaseDate = useMemo(() => {
     const d = new Date();
@@ -125,32 +146,29 @@ export function RetroPlanning() {
     setItems((prev) => prev.map((x) => (x.id === id ? updated : x)));
   }
 
-  const viewOptions: { id: PlanningView; label: string; hint: string }[] = [
-    { id: "calendar", label: "Calendrier", hint: "Navigation mensuelle avec vue dense et efficace" },
-    { id: "buckets", label: "Échéances", hint: "Retard, cette semaine, sans date, etc." },
-  ];
-
   return (
     <div className="mx-auto max-w-[1480px] px-5 py-8 lg:px-10 lg:py-10">
       <div className="mb-10 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--accent)]">Pilotage temporel</p>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight text-[var(--text)] sm:text-3xl">Planning</h1>
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--accent)]">
+            {t("Time-based triage", "Pilotage temporel")}
+          </p>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight text-[var(--text)] sm:text-3xl">{t("Planning", "Planning")}</h1>
         </div>
         <button type="button" onClick={() => void load()} className="ui-btn-secondary px-4 py-2.5 text-xs font-semibold">
-          Actualiser
+          {t("Refresh", "Actualiser")}
         </button>
       </div>
 
       <div className="ui-card mb-6 flex flex-col gap-4 p-4 lg:p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
           <label className="flex min-w-[min(100%,240px)] flex-col gap-1.5 text-xs font-medium text-[var(--muted)]">
-            Vue
+            {t("View", "Vue")}
             <select
               value={view}
               onChange={(e) => setView(e.target.value as PlanningView)}
               className="ui-input w-full max-w-md px-3 py-2.5 text-sm font-semibold text-[var(--text)]"
-              aria-label="Choisir la vue du planning"
+              aria-label={t("Choose planning view", "Choisir la vue du planning")}
             >
               {viewOptions.map((o) => (
                 <option key={o.id} value={o.id}>
@@ -161,7 +179,7 @@ export function RetroPlanning() {
           </label>
         </div>
         <details className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-muted)]/60 px-3 py-2 text-xs">
-          <summary className="cursor-pointer select-none font-semibold text-[var(--text)]">Filtres</summary>
+          <summary className="cursor-pointer select-none font-semibold text-[var(--text)]">{t("Filters", "Filtres")}</summary>
           <div className="mt-3 flex flex-col gap-3 text-[var(--muted)] sm:flex-row sm:flex-wrap sm:gap-6">
             <label className="flex cursor-pointer items-center gap-2">
               <input
@@ -171,7 +189,7 @@ export function RetroPlanning() {
                 onChange={() => setFilterMode("with_done")}
                 className="rounded border-[var(--border)]"
               />
-              Afficher les terminées / acquittées
+              {t("Show completed / acknowledged", "Afficher les terminées / acquittées")}
             </label>
             <label className="flex cursor-pointer items-center gap-2">
               <input
@@ -181,7 +199,7 @@ export function RetroPlanning() {
                 onChange={() => setFilterMode("unack_only")}
                 className="rounded border-[var(--border)]"
               />
-              Non acquittées seulement
+              {t("Not acknowledged only", "Non acquittées seulement")}
             </label>
           </div>
         </details>
@@ -194,19 +212,33 @@ export function RetroPlanning() {
       ) : null}
 
       {loading ? (
-        <p className="text-sm text-[var(--muted)]">Chargement…</p>
+        <p className="text-sm text-[var(--muted)]">{t("Loading…", "Chargement…")}</p>
       ) : items.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">
-          Aucune vulnérabilité. Créez-en depuis le{" "}
-          <Link href="/kanban" className="text-[var(--accent)] underline">
-            Kanban
-          </Link>
-          .
+          {locale === "fr" ? (
+            <>
+              Aucune vulnérabilité. Créez-en depuis le{" "}
+              <Link href="/kanban" className="text-[var(--accent)] underline">
+                tableau Kanban
+              </Link>
+              .
+            </>
+          ) : (
+            <>
+              No vulnerabilities yet. Create some from the{" "}
+              <Link href="/kanban" className="text-[var(--accent)] underline">
+                Kanban
+              </Link>{" "}
+              board.
+            </>
+          )}
         </p>
       ) : visible.length === 0 ? (
-        <p className="text-sm text-[var(--muted)]">Aucun élément ne correspond au filtre actuel.</p>
+        <p className="text-sm text-[var(--muted)]">{t("Nothing matches the current filter.", "Aucun élément ne correspond au filtre actuel.")}</p>
       ) : view === "calendar" ? (
         <CalendarBody
+          locale={locale}
+          t={t}
           items={visible}
           baseDate={calendarBaseDate}
           onPrevMonth={() => setCalendarMonthOffset((v) => v - 1)}
@@ -217,26 +249,39 @@ export function RetroPlanning() {
           onPatchAck={patchAck}
         />
       ) : (
-        <BucketsBody grouped={grouped} onPatchDue={patchDue} onPatchStatus={patchStatus} onPatchAck={patchAck} />
+        <BucketsBody
+          locale={locale}
+          grouped={grouped}
+          onPatchDue={patchDue}
+          onPatchStatus={patchStatus}
+          onPatchAck={patchAck}
+        />
       )}
     </div>
   );
 }
 
 function BucketsBody({
+  locale,
   grouped,
   onPatchDue,
   onPatchStatus,
   onPatchAck,
 }: {
+  locale: "en" | "fr";
   grouped: Map<PlanningBucketId, Vuln[]>;
   onPatchDue: (id: string, dateStr: string) => void;
   onPatchStatus: (id: string, s: VulnStatus) => void;
   onPatchAck: (id: string, ack: boolean) => void;
 }) {
+  const t = (en: string, fr: string) => uiT(locale, en, fr);
   const hasContent = [...grouped.values()].some((list) => list.length > 0);
   if (!hasContent) {
-    return <p className="text-sm text-[var(--muted)]">Aucun élément à afficher pour les filtres en cours.</p>;
+    return (
+      <p className="text-sm text-[var(--muted)]">
+        {t("Nothing to show for the current filters.", "Aucun élément à afficher pour les filtres en cours.")}
+      </p>
+    );
   }
 
   return (
@@ -247,7 +292,7 @@ function BucketsBody({
         return (
           <section key={bucketId}>
             <h2 className="mb-3 text-sm font-semibold text-[var(--text)]">
-              {BUCKET_LABEL[bucketId]}
+              {bucketLabel(bucketId, locale)}
               <span className="ml-2 font-normal text-[var(--muted)]">({list.length})</span>
             </h2>
             <div className="space-y-2">
@@ -268,7 +313,7 @@ function BucketsBody({
   );
 }
 
-function groupByDayForCalendar(items: Vuln[]): Map<string, Vuln[]> {
+function groupByDayForCalendar(items: Vuln[], collatorLocale: string): Map<string, Vuln[]> {
   const map = new Map<string, Vuln[]>();
   for (const v of items) {
     if (!v.dueAt) continue;
@@ -277,12 +322,14 @@ function groupByDayForCalendar(items: Vuln[]): Map<string, Vuln[]> {
     map.get(key)!.push(v);
   }
   for (const list of map.values()) {
-    list.sort((a, b) => a.title.localeCompare(b.title, "fr"));
+    list.sort((a, b) => a.title.localeCompare(b.title, collatorLocale));
   }
   return map;
 }
 
 function CalendarBody({
+  locale,
+  t,
   items,
   baseDate,
   onPrevMonth,
@@ -292,6 +339,8 @@ function CalendarBody({
   onPatchStatus,
   onPatchAck,
 }: {
+  locale: "en" | "fr";
+  t: (en: string, fr: string) => string;
   items: Vuln[];
   baseDate: Date;
   onPrevMonth: () => void;
@@ -302,6 +351,8 @@ function CalendarBody({
   onPatchAck: (id: string, ack: boolean) => void;
 }) {
   const now = new Date();
+  const collatorLocale = locale === "fr" ? "fr" : "en";
+  const dateLoc = dateLocaleTag(locale);
   const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const year = baseDate.getFullYear();
@@ -314,8 +365,12 @@ function CalendarBody({
   for (let day = 1; day <= daysInMonth; day++) cells.push(day);
   while (cells.length % 7 !== 0) cells.push(null);
 
-  const byDay = groupByDayForCalendar(items);
+  const byDay = useMemo(() => groupByDayForCalendar(items, collatorLocale), [items, collatorLocale]);
   const taskById = useMemo(() => new Map(items.map((v) => [v.id, v])), [items]);
+  const weekdayLabels =
+    locale === "fr"
+      ? ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
+      : ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   const selectedTasks = selectedDayKey ? byDay.get(selectedDayKey) ?? [] : [];
 
   useEffect(() => {
@@ -344,18 +399,18 @@ function CalendarBody({
             ▶
           </button>
           <button type="button" onClick={onToday} className="ui-btn-secondary px-2.5 py-1 text-xs">
-            Aujourd’hui
+            {t("Today", "Aujourd’hui")}
           </button>
         </div>
         <p className="text-sm font-semibold text-[var(--text)]">
-          {baseDate.toLocaleDateString("fr-FR", { month: "long", year: "numeric" })}
+          {baseDate.toLocaleDateString(dateLoc, { month: "long", year: "numeric" })}
         </p>
       </div>
 
       <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="ui-card p-3">
           <div className="mb-2 grid grid-cols-7 text-center text-[10px] font-semibold text-[var(--muted)]">
-            {["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"].map((d) => (
+            {weekdayLabels.map((d) => (
               <span key={d}>{d}</span>
             ))}
           </div>
@@ -411,12 +466,16 @@ function CalendarBody({
                         }}
                         onDragEnd={() => setDraggedTaskId(null)}
                         className="truncate rounded border border-[var(--border)] bg-[var(--surface)] px-1 py-0.5 text-[9px] leading-tight text-[var(--text)]"
-                        title="Glisser pour déplacer l’échéance"
+                        title={t("Drag to change due date", "Glisser pour déplacer l’échéance")}
                       >
                         {v.title}
                       </li>
                     ))}
-                    {list.length > 3 ? <li className="text-[9px] text-[var(--muted)]">+{list.length - 3} autres…</li> : null}
+                    {list.length > 3 ? (
+                      <li className="text-[9px] text-[var(--muted)]">
+                        {t(`+${list.length - 3} more`, `+${list.length - 3} autres…`)}
+                      </li>
+                    ) : null}
                   </ul>
                 </button>
               );
@@ -428,8 +487,11 @@ function CalendarBody({
           <div className="mb-2 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-[var(--text)]">
               {selectedDayKey
-                ? `Échéances du ${new Date(`${selectedDayKey}T12:00:00`).toLocaleDateString("fr-FR")}`
-                : "Détail du jour"}
+                ? t(
+                    `Due on ${new Date(`${selectedDayKey}T12:00:00`).toLocaleDateString(dateLoc)}`,
+                    `Échéances du ${new Date(`${selectedDayKey}T12:00:00`).toLocaleDateString(dateLoc)}`,
+                  )
+                : t("Day detail", "Détail du jour")}
             </h3>
             {selectedDayKey ? (
               <button
@@ -437,14 +499,14 @@ function CalendarBody({
                 onClick={() => setSelectedDayKey(null)}
                 className="ui-btn-secondary px-2 py-1 text-[10px]"
               >
-                Fermer
+                {t("Close", "Fermer")}
               </button>
             ) : null}
           </div>
           {!selectedDayKey ? (
-            <p className="text-xs text-[var(--muted)]">Sélectionnez une date.</p>
+            <p className="text-xs text-[var(--muted)]">{t("Select a date.", "Sélectionnez une date.")}</p>
           ) : selectedTasks.length === 0 ? (
-            <p className="text-xs text-[var(--muted)]">Aucune tâche sur cette date.</p>
+            <p className="text-xs text-[var(--muted)]">{t("No tasks on this date.", "Aucune tâche sur cette date.")}</p>
           ) : (
             <div className="space-y-2">
               {selectedTasks.map((v) => (
