@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { Severity, VulnSource } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { saveImportedReport } from "@/lib/reports-storage";
+import { recordVulnCreated } from "@/lib/vuln-timeline";
 
 type S1Exposure = {
   id?: unknown;
@@ -201,15 +202,22 @@ export async function POST(request: Request) {
       skipped++;
       continue;
     }
-    await prisma.vulnerability.create({
-      data: {
-        title: c.title,
-        severity: c.severity,
-        source: VulnSource.IMPORT,
-        externalRef: c.externalRef,
-        metadata: { provider: "sentinelone_ispm" },
-        importBatchId: batch.id,
-      },
+    await prisma.$transaction(async (tx) => {
+      const row = await tx.vulnerability.create({
+        data: {
+          title: c.title,
+          severity: c.severity,
+          source: VulnSource.IMPORT,
+          externalRef: c.externalRef,
+          metadata: { provider: "sentinelone_ispm" },
+          importBatchId: batch.id,
+        },
+      });
+      await recordVulnCreated(tx, {
+        vulnerabilityId: row.id,
+        toStatus: row.status,
+        severity: row.severity,
+      });
     });
     created++;
   }

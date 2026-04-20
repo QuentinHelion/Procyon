@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { Severity, VulnStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { recordVulnStatusChanged } from "@/lib/vuln-timeline";
 
 const SEVERITIES = new Set(Object.values(Severity));
 const STATUSES = new Set(Object.values(VulnStatus));
@@ -92,45 +93,60 @@ export async function PATCH(request: Request, context: Ctx) {
     return NextResponse.json({ error: "Aucun champ à mettre à jour" }, { status: 400 });
   }
 
-  try {
-    if (shouldRememberPreviousStatus || shouldRestorePreviousStatus) {
-      const current = await prisma.vulnerability.findUnique({
-        where: { id },
-        select: { status: true, metadata: true },
-      });
-      if (!current) {
-        return NextResponse.json({ error: "Non trouvé" }, { status: 404 });
-      }
-      const currentMeta =
-        current.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata)
-          ? (current.metadata as Record<string, unknown>)
-          : {};
+  const existing = await prisma.vulnerability.findUnique({
+    where: { id },
+    select: { status: true, severity: true, metadata: true },
+  });
+  if (!existing) {
+    return NextResponse.json({ error: "Non trouvé" }, { status: 404 });
+  }
+  const prevSeverity = existing.severity;
 
-      if (shouldRememberPreviousStatus) {
-        if (current.status !== VulnStatus.ARCHIVE) {
-          data.metadata = {
-            ...currentMeta,
-            archivedFromStatus: current.status,
-          };
-        }
-      } else if (shouldRestorePreviousStatus) {
-        const from = currentMeta.archivedFromStatus;
-        if (from === VulnStatus.TODO || from === VulnStatus.IN_PROGRESS || from === VulnStatus.DONE) {
-          data.status = from;
-        } else {
-          data.status = VulnStatus.TODO;
-        }
+  if (shouldRememberPreviousStatus || shouldRestorePreviousStatus) {
+    const currentMeta =
+      existing.metadata && typeof existing.metadata === "object" && !Array.isArray(existing.metadata)
+        ? (existing.metadata as Record<string, unknown>)
+        : {};
+
+    if (shouldRememberPreviousStatus) {
+      if (existing.status !== VulnStatus.ARCHIVE) {
         data.metadata = {
           ...currentMeta,
-          archivedFromStatus: null,
+          archivedFromStatus: existing.status,
         };
       }
+    } else if (shouldRestorePreviousStatus) {
+      const from = currentMeta.archivedFromStatus;
+      if (from === VulnStatus.TODO || from === VulnStatus.IN_PROGRESS || from === VulnStatus.DONE) {
+        data.status = from;
+      } else {
+        data.status = VulnStatus.TODO;
+      }
+      data.metadata = {
+        ...currentMeta,
+        archivedFromStatus: null,
+      };
     }
+  }
 
-    const updated = await prisma.vulnerability.update({
-      where: { id },
-      data,
-      include: { importBatch: { include: { template: true } } },
+  const prevStatus = existing.status;
+
+  try {
+    const updated = await prisma.$transaction(async (tx) => {
+      const row = await tx.vulnerability.update({
+        where: { id },
+        data,
+        include: { importBatch: { include: { template: true } } },
+      });
+      if (prevStatus !== row.status || prevSeverity !== row.severity) {
+        await recordVulnStatusChanged(tx, {
+          vulnerabilityId: id,
+          fromStatus: prevStatus,
+          toStatus: row.status,
+          severity: row.severity,
+        });
+      }
+      return row;
     });
     return NextResponse.json(updated);
   } catch {

@@ -40,7 +40,11 @@ const WIDGETS: WidgetDef[] = [
   { id: "deadlines_window", title: "Upcoming Deadlines", description: "Custom window by days or months." },
   { id: "status_breakdown", title: "Status Breakdown", description: "Alerts count by status." },
   { id: "severity_breakdown", title: "Severity Breakdown", description: "Alerts count by severity." },
-  { id: "trend_chart", title: "Trend Over Time", description: "Evolution by severity with filters." },
+  {
+    id: "trend_chart",
+    title: "Trend Over Time",
+    description: "Open backlog by severity over time (from status timeline).",
+  },
   { id: "open_pie", title: "Open by Type", description: "Donut of open alerts by severity." },
   { id: "inprogress_pie", title: "In Progress by Type", description: "Donut of in-progress alerts by severity." },
 ];
@@ -138,6 +142,11 @@ export function MonitoringOverview() {
     INFO: false,
   });
 
+  const [stockBuckets, setStockBuckets] = useState<{ key: string; label: string }[]>([]);
+  const [stockSeries, setStockSeries] = useState<Record<Severity, number[]> | null>(null);
+  const [stockLoading, setStockLoading] = useState(false);
+  const [stockError, setStockError] = useState<string | null>(null);
+
   const [deadlineStart, setDeadlineStart] = useState<string>(() => toDateInput(new Date()));
   const [deadlineUnit, setDeadlineUnit] = useState<DeadlineUnit>("days");
   const [deadlineAmount, setDeadlineAmount] = useState(7);
@@ -153,6 +162,57 @@ export function MonitoringOverview() {
     setTrendStart(toDateInput(start));
     setTrendEnd(toDateInput(end));
   }, [trendPreset]);
+
+  const trendStatusFilterKey = useMemo(
+    () =>
+      (Object.keys(trendStatuses) as VulnStatus[])
+        .filter((k) => trendStatuses[k])
+        .sort()
+        .join(","),
+    [trendStatuses],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const statuses = (Object.keys(trendStatuses) as VulnStatus[]).filter((k) => trendStatuses[k]);
+    if (statuses.length === 0) {
+      setStockBuckets([]);
+      setStockSeries(null);
+      setStockLoading(false);
+      return;
+    }
+    setStockLoading(true);
+    setStockError(null);
+    const qs = new URLSearchParams({
+      from: trendStart,
+      to: trendEnd,
+      granularity: trendGranularity,
+      statuses: statuses.join(","),
+      locale,
+    });
+    void (async () => {
+      try {
+        const body = await parseJson<{
+          buckets: { key: string; label: string }[];
+          series: Record<Severity, number[]>;
+        }>(await fetch(`/api/analytics/open-stock?${qs}`));
+        if (cancelled) return;
+        setStockBuckets(body.buckets);
+        setStockSeries(body.series);
+      } catch (e) {
+        if (!cancelled) {
+          setStockError(e instanceof Error ? e.message : locale === "fr" ? "Erreur courbe" : "Failed to load trend");
+          setStockBuckets([]);
+          setStockSeries(null);
+        }
+      } finally {
+        if (!cancelled) setStockLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [trendStart, trendEnd, trendGranularity, locale, trendStatusFilterKey]);
 
   useEffect(() => {
     try {
@@ -247,46 +307,14 @@ export function MonitoringOverview() {
     return out;
   }, [inProgressItems]);
 
-  const trendBuckets = useMemo(() => {
-    const start = parseDateInput(trendStart);
-    const end = parseDateInput(trendEnd);
-    if (!start || !end) return [];
-    const safeStart = start <= end ? start : end;
-    const safeEnd = start <= end ? end : start;
-    return buildTrendBuckets(safeStart, safeEnd, trendGranularity, locale);
-  }, [locale, trendEnd, trendGranularity, trendStart]);
-
-  const trendSeries = useMemo(() => {
-    const filtered = items.filter((v) => trendStatuses[v.status] && trendSeverities[v.severity]);
-    const base: Record<Severity, number[]> = {
-      CRITICAL: new Array(trendBuckets.length).fill(0),
-      HIGH: new Array(trendBuckets.length).fill(0),
-      MEDIUM: new Array(trendBuckets.length).fill(0),
-      LOW: new Array(trendBuckets.length).fill(0),
-      INFO: new Array(trendBuckets.length).fill(0),
-    };
-    const bucketIdx = new Map(trendBuckets.map((b, i) => [b.key, i]));
-    for (const v of filtered) {
-      const d = new Date(v.createdAt);
-      if (Number.isNaN(d.getTime())) continue;
-      const key = bucketKey(d, trendGranularity);
-      const i = bucketIdx.get(key) ?? -1;
-      if (i >= 0) base[v.severity][i] += 1;
-    }
-
-    // Convert per-bucket creations into cumulative total over time.
-    for (const sev of severityOrder) {
-      for (let i = 1; i < base[sev].length; i++) {
-        base[sev][i] += base[sev][i - 1];
-      }
-    }
-    return base;
-  }, [items, trendBuckets, trendGranularity, trendSeverities, trendStatuses]);
-
-  const trendYMax = useMemo(
-    () => Math.max(5, ...severityOrder.filter((s) => trendSeverities[s]).flatMap((s) => trendSeries[s]), 1),
-    [trendSeries, trendSeverities],
-  );
+  const trendYMax = useMemo(() => {
+    if (!stockSeries || stockBuckets.length === 0) return 5;
+    return Math.max(
+      5,
+      ...severityOrder.filter((s) => trendSeverities[s]).flatMap((s) => stockSeries[s] ?? []),
+      1,
+    );
+  }, [stockSeries, stockBuckets.length, trendSeverities]);
 
   const deadlineRange = useMemo(() => {
     const start = parseDateInput(deadlineStart) ?? new Date();
@@ -534,8 +562,16 @@ export function MonitoringOverview() {
                       </select>
                     </label>
                     <details className="relative">
-                      <summary className="ui-btn-secondary list-none cursor-pointer px-2.5 py-1 text-xs">{t("Statuses", "Statuts")}</summary>
-                      <div className="absolute z-20 mt-1 w-48 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-2 shadow-xl">
+                      <summary className="ui-btn-secondary list-none cursor-pointer px-2.5 py-1 text-xs">
+                        {t("Statuses (stock)", "Statuts (stock)")}
+                      </summary>
+                      <div className="absolute z-20 mt-1 w-56 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-2 shadow-xl">
+                        <p className="mb-2 text-[10px] leading-snug text-[var(--muted)]">
+                          {t(
+                            "Count vulnerabilities in each status at the end of each period (timeline replay).",
+                            "Compte les fiches dans chaque statut en fin de periode (rejoue la chronologie).",
+                          )}
+                        </p>
                         {(Object.keys(statusLabel) as VulnStatus[]).map((s) => (
                           <label key={s} className="flex items-center gap-2 text-xs text-[var(--muted)]">
                             <input type="checkbox" checked={trendStatuses[s]} onChange={() => toggleTrendStatus(s)} className="h-3.5 w-3.5 rounded border-[var(--border)]" />
@@ -556,13 +592,31 @@ export function MonitoringOverview() {
                       </div>
                     </details>
                   </div>
-                  <TrendChart
-                    buckets={trendBuckets}
-                    series={trendSeries}
-                    yMax={trendYMax}
-                    severityLabel={severityLabel}
-                    visibleSeverities={trendSeverities}
-                  />
+                  {stockError ? (
+                    <p className="text-xs text-red-600 dark:text-red-300">{stockError}</p>
+                  ) : null}
+                  {stockLoading ? (
+                    <p className="text-xs text-[var(--muted)]">{t("Loading trend…", "Chargement de la courbe…")}</p>
+                  ) : null}
+                  {!stockLoading && !stockError && stockBuckets.length > 0 && stockSeries ? (
+                    <TrendChart
+                      buckets={stockBuckets}
+                      series={stockSeries}
+                      yMax={trendYMax}
+                      severityLabel={severityLabel}
+                      visibleSeverities={trendSeverities}
+                    />
+                  ) : !stockLoading && !stockError && stockBuckets.length === 0 ? (
+                    <p className="text-xs text-[var(--muted)]">
+                      {t("Select at least one status to plot.", "Cochez au moins un statut pour afficher la courbe.")}
+                    </p>
+                  ) : null}
+                  <p className="mt-2 text-[10px] leading-snug text-[var(--muted)]">
+                    {t(
+                      "Based on creation and status-change history (not simple creation dates).",
+                      "Base sur l’historique des créations et changements de statut (pas seulement la date de création).",
+                    )}
+                  </p>
                 </div>
               ) : id === "open_pie" ? (
                 <DonutWidget title={t("Open by Severity", "Ouvertes par criticite")} data={openBySeverity} severityLabel={severityLabel} totalLabel={t("Total", "Total")} />
@@ -882,69 +936,6 @@ function parseDateInput(s: string): Date | null {
   if (!s) return null;
   const d = new Date(`${s}T00:00:00`);
   return Number.isNaN(d.getTime()) ? null : d;
-}
-
-function startOfWeekMonday(d: Date): Date {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  const day = (x.getDay() + 6) % 7;
-  x.setDate(x.getDate() - day);
-  return x;
-}
-
-function bucketKey(d: Date, granularity: TrendGranularity): string {
-  if (granularity === "month") return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-  if (granularity === "day") return toDateInput(d);
-  const w = startOfWeekMonday(d);
-  return `W-${toDateInput(w)}`;
-}
-
-function buildTrendBuckets(
-  start: Date,
-  end: Date,
-  granularity: TrendGranularity,
-  locale: "en" | "fr",
-): { key: string; label: string }[] {
-  const out: { key: string; label: string }[] = [];
-  const current = new Date(start);
-  current.setHours(0, 0, 0, 0);
-
-  if (granularity === "month") {
-    current.setDate(1);
-    while (current <= end) {
-      out.push({
-        key: bucketKey(current, "month"),
-        label: current.toLocaleDateString(locale === "fr" ? "fr-FR" : "en-US", { month: "short", year: "2-digit" }),
-      });
-      current.setMonth(current.getMonth() + 1);
-    }
-    return out;
-  }
-
-  if (granularity === "week") {
-    let week = startOfWeekMonday(current);
-    while (week <= end) {
-      out.push({
-        key: bucketKey(week, "week"),
-        label:
-          (locale === "fr" ? "S" : "W") +
-          " " +
-          week.toLocaleDateString(locale === "fr" ? "fr-FR" : "en-US", { day: "2-digit", month: "2-digit" }),
-      });
-      week = new Date(week);
-      week.setDate(week.getDate() + 7);
-    }
-    return out;
-  }
-
-  while (current <= end) {
-    out.push({
-      key: bucketKey(current, "day"),
-      label: current.toLocaleDateString(locale === "fr" ? "fr-FR" : "en-US", { day: "2-digit", month: "2-digit" }),
-    });
-    current.setDate(current.getDate() + 1);
-  }
-  return out;
 }
 
 function createDonutSegments(values: number[]) {

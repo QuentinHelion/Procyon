@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { Severity, VulnSource, VulnStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { recordVulnCreated } from "@/lib/vuln-timeline";
 
 const SEVERITIES = new Set(Object.values(Severity));
 const STATUSES = new Set(Object.values(VulnStatus));
@@ -59,16 +60,24 @@ export async function POST(request: Request) {
     }
   }
 
-  const created = await prisma.vulnerability.create({
-    data: {
-      title,
-      description: description || null,
-      severity,
-      status,
-      source: VulnSource.MANUAL,
-      ...(dueAt !== undefined ? { dueAt } : {}),
-    },
-    include: { importBatch: { include: { template: true } } },
+  const created = await prisma.$transaction(async (tx) => {
+    const row = await tx.vulnerability.create({
+      data: {
+        title,
+        description: description || null,
+        severity,
+        status,
+        source: VulnSource.MANUAL,
+        ...(dueAt !== undefined ? { dueAt } : {}),
+      },
+      include: { importBatch: { include: { template: true } } },
+    });
+    await recordVulnCreated(tx, {
+      vulnerabilityId: row.id,
+      toStatus: row.status,
+      severity: row.severity,
+    });
+    return row;
   });
 
   return NextResponse.json(created, { status: 201 });

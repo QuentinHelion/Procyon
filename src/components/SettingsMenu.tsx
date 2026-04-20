@@ -88,7 +88,6 @@ export function SettingsMenu({ collapsed = false }: { collapsed?: boolean }) {
           <div className="mt-4">
             <p className="text-xs font-medium text-[var(--muted)]">{locale === "fr" ? "Thème" : "Theme"}</p>
             <p className="mt-0.5 text-[10px] text-[var(--muted)]">
-              {locale === "fr" ? "Rendu :" : "Render:"} {resolved === "dark" ? (locale === "fr" ? "sombre" : "dark") : locale === "fr" ? "clair" : "light"}
               {mode === "system" ? (locale === "fr" ? " · suit le système" : " · follows system") : ""}
             </p>
             <div className="mt-2 grid grid-cols-3 gap-1 rounded-lg bg-[var(--column)] p-1">

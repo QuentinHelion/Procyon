@@ -27,6 +27,12 @@ enum VulnSource {
   IMPORT
 }
 
+/// Journal chronologique des créations et changements de statut (dashboards temporels).
+enum VulnTimelineEventKind {
+  CREATED
+  STATUS_CHANGED
+}
+
 model ScanTemplate {
   id          String   @id @default(cuid())
   name        String
@@ -64,11 +70,29 @@ model Vulnerability {
   importBatchId String?
   importBatch   ImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
 
+  timelineEvents VulnTimelineEvent[]
+
   @@index([status])
   @@index([severity])
   @@index([externalRef])
   @@index([dueAt])
   @@index([acknowledgedAt])
+}
+
+model VulnTimelineEvent {
+  id              String                 @id @default(cuid())
+  vulnerabilityId String
+  vulnerability   Vulnerability        @relation(fields: [vulnerabilityId], references: [id], onDelete: Cascade)
+  /// Instantané métier (peut différer de createdAt row pour imports rejoués).
+  occurredAt      DateTime               @default(now())
+  kind              VulnTimelineEventKind
+  fromStatus        VulnStatus?
+  toStatus          VulnStatus
+  /// Gravité connue à cet instant (pour séries « ouvert par criticité »).
+  severityAtEvent   Severity
+
+  @@index([occurredAt])
+  @@index([vulnerabilityId, occurredAt])
 }
 
 model ImportBatch {

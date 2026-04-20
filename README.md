@@ -11,7 +11,7 @@ Modern dashboard widgets, Kanban operations, calendar planning, and extensible i
 [![Prisma](https://img.shields.io/badge/Prisma-ORM-2D3748?logo=prisma)](https://www.prisma.io/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-[Features](#-features) · [Quick start](#-quick-start) · [Docker](#-docker) · [API](#-api) · [Contributing](#-contributing)
+[Features](#-features) · [Local development](#-local-development-without-docker) · [Docker](#-docker-optional) · [API](#-api) · [Contributing](#-contributing)
 
 </div>
 
@@ -70,44 +70,64 @@ flowchart LR
 
 ---
 
-## Quick start
+## Local development (without Docker)
+
+You only need **Node.js** and a running **PostgreSQL** instance. The Next.js app runs on your machine; Docker is optional.
 
 ### Prerequisites
 
-- **Node.js** 20+ (recommended)
-- **PostgreSQL** 14+ (or use Docker Compose below)
+- **Node.js** 20+ (22 matches the production Dockerfile)
+- **PostgreSQL** 14+
 
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/QuentinHelion/Procyon
-cd procyon
+git clone https://github.com/QuentinHelion/Procyon.git
+cd Procyon
 npm install
 ```
 
-### 2. Environment
+`postinstall` runs **`prisma generate`** so the client is ready before the first dev server start.
+
+### 2. Create the database (one-time)
+
+Create a database and user that match `DATABASE_URL` (default in `.env.example`: user `procyon`, database `procyon`). Example with `psql` as a superuser:
+
+```sql
+CREATE USER procyon WITH PASSWORD 'procyon';
+CREATE DATABASE procyon OWNER procyon;
+```
+
+Or use any existing database — then point `DATABASE_URL` at it.
+
+**Shortcut — Postgres only in Docker, app stays local:**
+
+```bash
+npm run docker:db
+```
+
+This starts the `db` service from `docker-compose.yml` on port **5432**. Keep `.env` aligned with the compose credentials (same as `.env.example`), then continue with step 3.
+
+### 3. Environment
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env`:
-
 | Variable | Purpose |
 |----------|---------|
 | `DATABASE_URL` | PostgreSQL connection string |
-| `REPORTS_DIR` | Directory for archived import files (absolute or relative to cwd) |
+| `REPORTS_DIR` | Directory for archived import files (relative to project root or absolute; `data/reports` is gitignored) |
 
-### 3. Database
+### 4. Migrations and seed (one-time per database)
 
 ```bash
-npx prisma migrate deploy
-npx prisma db seed
+npm run setup
 ```
 
-The seed loads built-in scan templates (PingCastle XML, generic CSV, SentinelOne ISPM API).
+Equivalent to `prisma migrate deploy` + `prisma db seed` (built-in scan templates).
 
-### 4. Run
+### 5. Run the app
 
 ```bash
 npm run dev
@@ -120,16 +140,23 @@ Open **[http://localhost:3000](http://localhost:3000)**.
 | Command | Description |
 |---------|-------------|
 | `npm run dev` | Development server (Turbopack) |
+| `npm run setup` | Apply migrations + seed templates |
+| `npm run docker:db` | Start **only** PostgreSQL via Docker Compose (optional) |
+| `npm run db:seed` | Re-run seed (idempotent upserts) |
+| `npm run db:migrate` | `prisma migrate deploy` (CI / production) |
+| `npm run db:migrate:dev` | `prisma migrate dev` (when you author new migrations) |
 | `npm run build` | Production build (`prisma generate` + `next build`) |
-| `npm run start` | Start production server |
+| `npm run start` | Start production server (after `build`) |
 | `npm run lint` | ESLint |
 | `npm run db:studio` | Prisma Studio |
 
 ---
 
-## Docker
+## Docker (optional)
 
-Run the full stack (app + Postgres) with persisted DB and report volumes:
+### Full stack (app + Postgres)
+
+For a containerized deployment with persisted volumes:
 
 ```bash
 docker compose up --build
@@ -144,6 +171,10 @@ If you need to force seed once:
 ```bash
 docker compose run --rm -e RUN_SEED=1 app sh -lc "npx prisma db seed"
 ```
+
+### Database only (hybrid with local `npm run dev`)
+
+If you prefer **not** to install PostgreSQL on the host, you can run only the DB container and still develop with Node locally — see **`npm run docker:db`** in the local development section above.
 
 ---
 
@@ -195,7 +226,8 @@ REST-style handlers under `src/app/api/`.
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET`, `POST` | `/api/vulnerabilities` | List / create vulnerabilities |
-| `PATCH`, `DELETE` | `/api/vulnerabilities/[id]` | Update fields (status, `dueAt`, `acknowledgedAt`, …) / delete |
+| `PATCH`, `DELETE` | `/api/vulnerabilities/[id]` | Update fields (status, `dueAt`, `acknowledgedAt`, …) / delete; status changes append a timeline row |
+| `GET` | `/api/analytics/open-stock` | Time series: count vulnerabilities in selected statuses by severity at each period end (`from`, `to`, `granularity`, `statuses`, `locale`) — replays `VulnTimelineEvent` |
 | `GET`, `POST` | `/api/templates` | List / create scan templates |
 | `POST` | `/api/import/preview` | Preview file import (`multipart/form-data`: `file`, `templateSlug`) |
 | `POST` | `/api/import` | `multipart/form-data`: `file`, `templateSlug` |
@@ -212,10 +244,11 @@ Imports that supply `externalRef` update existing rows when a match is found. Pr
 ## Data model (high level)
 
 - **`Vulnerability`** — title, description, severity, status (`TODO` / `IN_PROGRESS` / `DONE` / `ARCHIVE`), source, optional `externalRef`, `dueAt`, `acknowledgedAt`, JSON `metadata`.
+- **`VulnTimelineEvent`** — append-only audit: `CREATED` (first appearance) and `STATUS_CHANGED` (from → to), with `severityAtEvent` and `occurredAt` for historical dashboards (open backlog by severity over time).
 - **`ScanTemplate`** — display name, slug, `parserId`, file hint.
 - **`ImportBatch`** — links uploads to a template; optional `storedPath` under `REPORTS_DIR`.
 
-Acknowledgement uses the `ARCHIVE` workflow and preserves previous status in metadata so tasks can be unacknowledged cleanly.
+Acknowledgement uses the `ARCHIVE` workflow and preserves previous status in metadata so tasks can be unacknowledged cleanly. Moving in or out of `ARCHIVE` records a `STATUS_CHANGED` timeline event like any other status transition.
 
 ---
 

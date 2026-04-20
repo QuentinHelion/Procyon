@@ -3,6 +3,7 @@ import { VulnSource } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { runParser } from "@/lib/parsers";
 import { saveImportedReport } from "@/lib/reports-storage";
+import { recordVulnCreated, recordVulnStatusChanged } from "@/lib/vuln-timeline";
 
 export async function POST(request: Request) {
   let form: FormData;
@@ -61,31 +62,51 @@ export async function POST(request: Request) {
     if (item.externalRef) {
       const existing = await prisma.vulnerability.findFirst({
         where: { externalRef: item.externalRef },
+        select: { id: true, status: true, severity: true },
       });
       if (existing) {
-        await prisma.vulnerability.update({
-          where: { id: existing.id },
-          data: {
-            title: item.title,
-            description: item.description ?? null,
-            severity: item.severity,
-            metadata: meta as object,
-            source: VulnSource.IMPORT,
-            importBatchId: batch.id,
-          },
+        await prisma.$transaction(async (tx) => {
+          const prevStatus = existing.status;
+          const prevSev = existing.severity;
+          const row = await tx.vulnerability.update({
+            where: { id: existing.id },
+            data: {
+              title: item.title,
+              description: item.description ?? null,
+              severity: item.severity,
+              metadata: meta as object,
+              source: VulnSource.IMPORT,
+              importBatchId: batch.id,
+            },
+          });
+          if (prevStatus !== row.status || prevSev !== row.severity) {
+            await recordVulnStatusChanged(tx, {
+              vulnerabilityId: row.id,
+              fromStatus: prevStatus,
+              toStatus: row.status,
+              severity: row.severity,
+            });
+          }
         });
         updated++;
       } else {
-        await prisma.vulnerability.create({
-          data: {
-            title: item.title,
-            description: item.description ?? null,
-            severity: item.severity,
-            externalRef: item.externalRef,
-            metadata: meta as object,
-            source: VulnSource.IMPORT,
-            importBatchId: batch.id,
-          },
+        await prisma.$transaction(async (tx) => {
+          const row = await tx.vulnerability.create({
+            data: {
+              title: item.title,
+              description: item.description ?? null,
+              severity: item.severity,
+              externalRef: item.externalRef,
+              metadata: meta as object,
+              source: VulnSource.IMPORT,
+              importBatchId: batch.id,
+            },
+          });
+          await recordVulnCreated(tx, {
+            vulnerabilityId: row.id,
+            toStatus: row.status,
+            severity: row.severity,
+          });
         });
         created++;
       }
@@ -101,15 +122,22 @@ export async function POST(request: Request) {
         skipped++;
         continue;
       }
-      await prisma.vulnerability.create({
-        data: {
-          title: item.title,
-          description: item.description ?? null,
-          severity: item.severity,
-          metadata: meta as object,
-          source: VulnSource.IMPORT,
-          importBatchId: batch.id,
-        },
+      await prisma.$transaction(async (tx) => {
+        const row = await tx.vulnerability.create({
+          data: {
+            title: item.title,
+            description: item.description ?? null,
+            severity: item.severity,
+            metadata: meta as object,
+            source: VulnSource.IMPORT,
+            importBatchId: batch.id,
+          },
+        });
+        await recordVulnCreated(tx, {
+          vulnerabilityId: row.id,
+          toStatus: row.status,
+          severity: row.severity,
+        });
       });
       created++;
     }
