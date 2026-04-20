@@ -374,27 +374,30 @@ export function MonitoringOverview() {
           <h1 className="mt-1 text-2xl font-bold tracking-tight text-[var(--text)] sm:text-3xl">
             {t("Vulnerability Monitoring", "Monitoring des vulnerabilites")}
           </h1>
-          <p className="mt-2 text-sm text-[var(--muted)]">
-            {t(
-              "Modern widget dashboard: stats, trends and workload.",
-              "Dashboard moderne par widgets : stats, tendances et charge de traitement.",
-            )}
-          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={() => void loadData()} className="ui-btn-secondary px-4 py-2 text-xs font-semibold">
             {t("Refresh data", "Actualiser les donnees")}
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              setLayout(DEFAULT_LAYOUT);
-              setHidden([]);
-            }}
-            className="ui-btn-secondary px-4 py-2 text-xs font-semibold"
-          >
-            {t("Reset layout", "Reinitialiser la vue")}
-          </button>
+          {editMode ? (
+            <button
+              type="button"
+              onClick={() => {
+                const ok = window.confirm(
+                  t(
+                    "Reset widget layout to default?",
+                    "Réinitialiser l’agencement des widgets aux valeurs par défaut ?",
+                  ),
+                );
+                if (!ok) return;
+                setLayout(DEFAULT_LAYOUT);
+                setHidden([]);
+              }}
+              className="ui-btn-secondary px-4 py-2 text-xs font-semibold"
+            >
+              {t("Reset layout", "Reinitialiser la vue")}
+            </button>
+          ) : null}
           <button type="button" onClick={() => setEditMode((v) => !v)} className="ui-btn-secondary px-4 py-2 text-xs font-semibold">
             {editMode ? t("Finish customization", "Terminer la personnalisation") : t("Customize widgets", "Personnaliser les widgets")}
           </button>

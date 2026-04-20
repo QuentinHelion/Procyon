@@ -152,6 +152,22 @@ const CATEGORY_LABEL: Record<VulnCategory, string> = {
   OTHER: "Autre import",
 };
 
+function sourceBadgeLabel(v: Vuln): string {
+  const category = vulnCategory(v);
+  if (category === "MANUAL") return "Saisie manuelle";
+  if (category === "OTHER") return "Scan importé";
+  return CATEGORY_LABEL[category];
+}
+
+function sourceBadgeClass(v: Vuln): string {
+  const category = vulnCategory(v);
+  if (category === "MANUAL") return "bg-[var(--column)] text-[var(--muted)]";
+  if (category === "PINGCASTLE") return "bg-sky-500/15 text-sky-800 dark:text-sky-200";
+  if (category === "GENERIC_CSV") return "bg-indigo-500/15 text-indigo-800 dark:text-indigo-200";
+  if (category === "SENTINELONE_ISPM") return "bg-violet-500/15 text-violet-800 dark:text-violet-200";
+  return "bg-zinc-500/15 text-[var(--muted)]";
+}
+
 function KanbanDroppableList({
   status,
   children,
@@ -222,8 +238,8 @@ function DashboardDraggableVulnCard({
               {severityLabel[v.severity]}
             </span>
             <div className="flex items-center gap-1.5">
-              <span className="rounded-md bg-[var(--column)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--muted)]">
-                {v.source === "IMPORT" ? "Scan importé" : "Saisie manuelle"}
+              <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-medium ${sourceBadgeClass(v)}`}>
+                {sourceBadgeLabel(v)}
               </span>
               <button
                 type="button"
@@ -1149,7 +1165,6 @@ export function Dashboard() {
                       </span>
                       <div>
                         <h2 className="text-sm font-bold text-[var(--text)]">{col.label}</h2>
-                        <p className="mt-0.5 text-[11px] leading-snug text-[var(--muted)]">{col.hint}</p>
                         <details className="relative mt-1">
                           <summary className="inline-flex list-none cursor-pointer items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--surface-muted)] px-2 py-1 text-[10px] font-medium text-[var(--muted)]">
                             Filtres
