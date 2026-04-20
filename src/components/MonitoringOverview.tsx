@@ -273,6 +273,7 @@ export function MonitoringOverview() {
       const i = bucketIdx.get(key) ?? -1;
       if (i >= 0) base[v.severity][i] += 1;
     }
+
     // Convert per-bucket creations into cumulative total over time.
     for (const sev of severityOrder) {
       for (let i = 1; i < base[sev].length; i++) {
