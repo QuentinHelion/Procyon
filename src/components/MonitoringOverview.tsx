@@ -173,21 +173,48 @@ export function MonitoringOverview() {
     localStorage.setItem("procyon-overview-layout", JSON.stringify({ layout, hidden }));
   }, [layout, hidden]);
 
-  async function loadData() {
-    setLoading(true);
-    setError(null);
+  async function loadData(options?: { silent?: boolean }) {
+    const silent = options?.silent === true;
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const data = await parseJson<Vuln[]>(await fetch("/api/vulnerabilities"));
       setItems(data);
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("Loading error", "Erreur de chargement"));
+      if (!silent) {
+        setError(e instanceof Error ? e.message : t("Loading error", "Erreur de chargement"));
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }
 
   useEffect(() => {
     void loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      void loadData({ silent: true });
+    }, 15000);
+    const onFocus = () => {
+      void loadData({ silent: true });
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        void loadData({ silent: true });
+      }
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -246,7 +273,8 @@ export function MonitoringOverview() {
       const i = bucketIdx.get(key) ?? -1;
       if (i >= 0) base[v.severity][i] += 1;
     }
-    // Convert creations-per-bucket into cumulative stock-over-time.
+
+    // Convert per-bucket creations into cumulative total over time.
     for (const sev of severityOrder) {
       for (let i = 1; i < base[sev].length; i++) {
         base[sev][i] += base[sev][i - 1];

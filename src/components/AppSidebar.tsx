@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useLocale } from "@/components/LocaleProvider";
@@ -21,6 +22,14 @@ function IconPlanning(props: { className?: string }) {
   );
 }
 
+function IconTasks(props: { className?: string }) {
+  return (
+    <svg className={props.className} fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 6.75h10.5M9 12h10.5M9 17.25h10.5M4.5 6.75h.008v.008H4.5V6.75Zm0 5.25h.008v.008H4.5V12Zm0 5.25h.008v.008H4.5v-.008Z" />
+    </svg>
+  );
+}
+
 function IconReports(props: { className?: string }) {
   return (
     <svg className={props.className} fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
@@ -32,7 +41,29 @@ function IconReports(props: { className?: string }) {
 export function AppSidebar() {
   const { locale } = useLocale();
   const pathname = usePathname();
+  const [collapsed, setCollapsed] = useState(false);
   const t = (en: string, fr: string) => (locale === "fr" ? fr : en);
+
+  useEffect(() => {
+    try {
+      setCollapsed(localStorage.getItem("procyon-sidebar-collapsed") === "1");
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  function toggleCollapsed() {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("procyon-sidebar-collapsed", next ? "1" : "0");
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }
+
   const links = [
     {
       href: "/",
@@ -42,9 +73,9 @@ export function AppSidebar() {
     },
     {
       href: "/kanban",
-      label: "Kanban",
-      description: t("Operational board", "Pilotage opérationnel"),
-      icon: IconBoard,
+      label: t("Tasks", "Tâches"),
+      description: t("Task operations", "Pilotage des tâches"),
+      icon: IconTasks,
     },
     {
       href: "/planning",
@@ -62,26 +93,55 @@ export function AppSidebar() {
 
   return (
     <aside
-      className="relative z-40 flex w-[4.25rem] shrink-0 flex-col self-stretch border-r border-[var(--sidebar-border)] bg-[var(--sidebar-bg)] lg:w-60"
+      className={`sticky top-0 z-40 flex h-dvh shrink-0 flex-col border-r border-[var(--sidebar-border)] bg-[var(--sidebar-bg)] transition-[width] ${
+        collapsed ? "w-[4.25rem]" : "w-60"
+      }`}
       aria-label={t("Navigation", "Navigation")}
     >
-      <div className="flex h-16 items-center justify-center border-b border-[var(--sidebar-border)] px-3 lg:justify-start lg:px-5">
-        <Link href="/" className="flex items-center gap-3">
+      <div className={`flex h-16 items-center border-b border-[var(--sidebar-border)] px-3 ${collapsed ? "justify-center" : "justify-between"}`}>
+        <Link href="/" className="flex min-w-0 items-center gap-3">
           <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--sidebar-accent-dim)] text-[var(--sidebar-accent)]">
             <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
               <path d="M12 2L4 6v6c0 5.25 3.66 10.17 8 11 4.34-.83 8-5.75 8-11V6l-8-4zm0 2.18l6 3v5.82c0 4.25-2.92 8.3-6 9.09-3.08-.79-6-4.84-6-9.09V7.18l6-3zM11 7h2v6h-2V7zm0 8h2v2h-2v-2z" />
             </svg>
           </span>
-          <div className="hidden min-w-0 lg:block">
+          {!collapsed ? (
+          <div className="min-w-0">
             <p className="truncate text-sm font-bold tracking-tight text-[var(--sidebar-text)]">Procyon</p>
             <p className="truncate text-[11px] font-medium text-[var(--sidebar-muted)]">
               {t("Posture & vulnerabilities", "Posture & vulnérabilités")}
             </p>
           </div>
+          ) : null}
         </Link>
+        {!collapsed ? (
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--sidebar-border)] text-[var(--sidebar-muted)] transition hover:bg-[var(--sidebar-hover)] hover:text-[var(--sidebar-text)]"
+            title={t("Collapse sidebar", "Réduire la barre")}
+            aria-label={t("Collapse sidebar", "Réduire la barre")}
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+            </svg>
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            className="absolute right-2 top-4 inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--sidebar-border)] text-[var(--sidebar-muted)] transition hover:bg-[var(--sidebar-hover)] hover:text-[var(--sidebar-text)]"
+            title={t("Expand sidebar", "Déplier la barre")}
+            aria-label={t("Expand sidebar", "Déplier la barre")}
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+            </svg>
+          </button>
+        )}
       </div>
 
-      <nav className="flex flex-1 flex-col gap-1 p-2 lg:p-3" aria-label={t("Sections", "Sections")}>
+      <nav className="flex flex-1 flex-col gap-1 p-2" aria-label={t("Sections", "Sections")}>
         {links.map(({ href, label, description, icon: Icon }) => {
           const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
           return (
@@ -89,7 +149,7 @@ export function AppSidebar() {
               key={href}
               href={href}
               title={label}
-              className={`group flex items-center gap-3 rounded-lg px-2 py-2.5 transition-colors lg:px-3 ${
+              className={`group flex items-center gap-3 rounded-lg px-2 py-2.5 transition-colors ${
                 active
                   ? "bg-[var(--sidebar-active)] text-[var(--sidebar-text)] shadow-sm ring-1 ring-[var(--sidebar-accent)]/25"
                   : "text-[var(--sidebar-muted)] hover:bg-[var(--sidebar-hover)] hover:text-[var(--sidebar-text)]"
@@ -100,17 +160,19 @@ export function AppSidebar() {
                   active ? "text-[var(--sidebar-accent)]" : "text-[var(--sidebar-muted)] group-hover:text-[var(--sidebar-text)]"
                 }`}
               />
-              <div className="hidden min-w-0 flex-1 lg:block">
+              {!collapsed ? (
+              <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold">{label}</p>
                 <p className="truncate text-[11px] opacity-80">{description}</p>
               </div>
+              ) : null}
             </Link>
           );
         })}
       </nav>
 
-      <div className="relative border-t border-[var(--sidebar-border)] p-2 lg:p-3">
-        <SettingsMenu />
+      <div className="relative mt-auto border-t border-[var(--sidebar-border)] p-2">
+        <SettingsMenu collapsed={collapsed} />
       </div>
     </aside>
   );

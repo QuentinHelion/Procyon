@@ -6,7 +6,7 @@ import { useLocale } from "./LocaleProvider";
 import type { ThemeMode } from "./ThemeProvider";
 import { useTheme } from "./ThemeProvider";
 
-export function SettingsMenu() {
+export function SettingsMenu({ collapsed = false }: { collapsed?: boolean }) {
   const { mode, setMode, resolved } = useTheme();
   const { locale, mode: localeMode, setMode: setLocaleMode } = useLocale();
   const [open, setOpen] = useState(false);
@@ -48,9 +48,13 @@ export function SettingsMenu() {
         ref={btnRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center justify-center gap-3 rounded-lg px-2 py-2.5 text-[var(--sidebar-muted)] transition-colors hover:bg-[var(--sidebar-hover)] hover:text-[var(--sidebar-text)] lg:justify-start lg:px-3"
+        className={`flex w-full items-center gap-3 rounded-lg px-2 py-2.5 text-[var(--sidebar-muted)] transition-colors hover:bg-[var(--sidebar-hover)] hover:text-[var(--sidebar-text)] ${
+          collapsed ? "justify-center" : "justify-start px-3"
+        }`}
         aria-expanded={open}
         aria-haspopup="dialog"
+        aria-controls="settings-panel"
+        aria-label={locale === "fr" ? "Ouvrir les paramètres" : "Open settings"}
       >
         <svg
           className="h-5 w-5 shrink-0"
@@ -67,11 +71,12 @@ export function SettingsMenu() {
           />
           <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
         </svg>
-        <span className="hidden text-sm font-semibold lg:inline">{locale === "fr" ? "Paramètres" : "Settings"}</span>
+        {!collapsed ? <span className="text-sm font-semibold">{locale === "fr" ? "Paramètres" : "Settings"}</span> : null}
       </button>
 
       {open ? (
         <div
+          id="settings-panel"
           ref={panelRef}
           className="fixed bottom-4 left-[4.25rem] z-[100] w-[min(calc(100vw-2rem),18rem)] rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-xl lg:absolute lg:bottom-full lg:left-0 lg:mb-2 lg:ml-0 lg:w-72"
           style={{ boxShadow: "var(--shadow-card), 0 12px 40px rgba(15,23,42,0.12)" }}
